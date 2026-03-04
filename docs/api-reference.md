@@ -743,18 +743,28 @@ spec:
 
 ### spec.gateway
 
-Configures the gateway authentication token.
+Configures the gateway authentication token and Control UI origins.
 
-| Field            | Type     | Default | Description                                                                                       |
-|------------------|----------|---------|---------------------------------------------------------------------------------------------------|
-| `existingSecret` | `string` | --      | Name of a user-managed Secret containing the gateway token. The Secret must have a key named `token`. When set, the operator skips auto-generating a gateway token Secret and uses this Secret instead. |
+| Field              | Type       | Default | Description                                                                                       |
+|--------------------|------------|---------|---------------------------------------------------------------------------------------------------|
+| `existingSecret`   | `string`   | --      | Name of a user-managed Secret containing the gateway token. The Secret must have a key named `token`. When set, the operator skips auto-generating a gateway token Secret and uses this Secret instead. |
+| `controlUiOrigins` | `[]string` | --      | Additional allowed origins for the Control UI. The operator always auto-injects `http://localhost:18789` and `http://127.0.0.1:18789` (for port-forwarding) and derives origins from ingress hosts. Use this field to add extra origins (e.g., custom reverse proxy URLs). Max 20 items. |
 
 When `existingSecret` is not set, the operator automatically generates a random gateway token Secret, which is tracked in `status.managedResources.gatewayTokenSecret`.
+
+The operator auto-injects `gateway.controlUi.allowedOrigins` into the config JSON with:
+- **Localhost** (always): `http://localhost:18789`, `http://127.0.0.1:18789`
+- **Ingress hosts**: `https://` if the host appears in TLS config, `http://` otherwise
+- **Explicit extras**: values from `spec.gateway.controlUiOrigins`
+
+If you set `gateway.controlUi.allowedOrigins` directly in your config JSON, the operator will not override it.
 
 ```yaml
 spec:
   gateway:
     existingSecret: my-gateway-token
+    controlUiOrigins:
+      - "https://proxy.example.com"
 ```
 
 ### spec.autoUpdate
