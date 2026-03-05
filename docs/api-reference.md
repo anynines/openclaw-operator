@@ -752,12 +752,18 @@ Configures the gateway authentication token and Control UI origins.
 
 When `existingSecret` is not set, the operator automatically generates a random gateway token Secret, which is tracked in `status.managedResources.gatewayTokenSecret`.
 
+**Auto-injected settings:**
+
+The operator always injects `gateway.controlUi.dangerouslyDisableDeviceAuth: true` into the config JSON. Device pairing (introduced in OpenClaw v2026.3.2) is fundamentally incompatible with Kubernetes because users cannot approve pairing from inside a container, connections always come through the nginx proxy sidecar (non-local), and mDNS is unavailable. If you explicitly set `gateway.controlUi.dangerouslyDisableDeviceAuth` in your config, your value takes precedence.
+
 The operator auto-injects `gateway.controlUi.allowedOrigins` into the config JSON with:
 - **Localhost** (always): `http://localhost:18789`, `http://127.0.0.1:18789`
 - **Ingress hosts**: `https://` if the host appears in TLS config, `http://` otherwise
 - **Explicit extras**: values from `spec.gateway.controlUiOrigins`
 
 If you set `gateway.controlUi.allowedOrigins` directly in your config JSON, the operator will not override it.
+
+**Note:** Since OpenClaw v2026.2.24, `gateway.allowedOrigins` defaults to same-origin only. If you access the Control UI through an Ingress or other non-default hostname, set `gateway.allowedOrigins: ["*"]` in your config to avoid blocked WebSocket connections.
 
 ```yaml
 spec:
