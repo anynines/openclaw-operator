@@ -48,6 +48,15 @@ const (
 	// built-in browser control service on port 3000.
 	ChromiumPort = 9222
 
+	// ChromiumProxyPort is the port the nginx CDP proxy listens on.
+	// It sits between OpenClaw and the browserless sidecar, injecting
+	// Chrome launch args (anti-bot flags) into WebSocket connections.
+	ChromiumProxyPort = 9223
+
+	// ChromiumProxyNginxConfigKey is the ConfigMap data key for the
+	// chromium CDP proxy nginx config
+	ChromiumProxyNginxConfigKey = "chromium-proxy-nginx.conf"
+
 	// OllamaPort is the port for the Ollama API
 	OllamaPort = 11434
 
@@ -119,6 +128,16 @@ const (
 	// DefaultMetricsPort is the default port for the Prometheus metrics endpoint
 	DefaultMetricsPort int32 = 9090
 )
+
+// DefaultChromiumLaunchArgs are anti-bot Chrome flags injected by the
+// chromium CDP proxy into every browserless WebSocket connection.
+// Browserless v2 deprecated DEFAULT_LAUNCH_ARGS (fully ignored since v2.0.0)
+// and only accepts launch args via the `launch` query parameter.
+var DefaultChromiumLaunchArgs = []string{
+	"--disable-blink-features=AutomationControlled",
+	"--disable-features=AutomationControlled",
+	"--no-first-run",
+}
 
 // Labels returns the standard labels for an OpenClawInstance
 func Labels(instance *openclawv1alpha1.OpenClawInstance) map[string]string {

@@ -127,6 +127,9 @@ func buildServicePorts(instance *openclawv1alpha1.OpenClawInstance) []corev1.Ser
 // main container (OpenClaw) checks CDP connectivity during startup — before
 // its own readiness probe has passed. Without this, the main ClusterIP Service
 // has no endpoints and the CDP health check fails permanently.
+//
+// Traffic is routed to the chromium CDP proxy (ChromiumProxyPort) which
+// injects anti-bot Chrome launch args before forwarding to browserless.
 func BuildChromiumCDPService(instance *openclawv1alpha1.OpenClawInstance) *corev1.Service {
 	labels := Labels(instance)
 	selectorLabels := SelectorLabels(instance)
@@ -146,7 +149,7 @@ func BuildChromiumCDPService(instance *openclawv1alpha1.OpenClawInstance) *corev
 				{
 					Name:       "cdp",
 					Port:       int32(ChromiumPort),
-					TargetPort: intstr.FromInt32(int32(ChromiumPort)),
+					TargetPort: intstr.FromInt32(int32(ChromiumProxyPort)),
 					Protocol:   corev1.ProtocolTCP,
 				},
 			},

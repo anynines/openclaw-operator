@@ -9325,23 +9325,30 @@ func TestBuildNetworkPolicy_ChromiumIngressAndEgress(t *testing.T) {
 	}
 
 	ports := np.Spec.Ingress[0].Ports
-	if len(ports) != 3 {
-		t.Fatalf("expected 3 ingress ports with chromium (gateway, canvas, chromium), got %d", len(ports))
+	if len(ports) != 4 {
+		t.Fatalf("expected 4 ingress ports with chromium (gateway, canvas, chromium, chromium-proxy), got %d", len(ports))
 	}
 
 	foundChromiumIngress := false
+	foundChromiumProxyIngress := false
 	for _, p := range ports {
 		if p.Port != nil && p.Port.IntValue() == ChromiumPort {
 			foundChromiumIngress = true
-			break
+		}
+		if p.Port != nil && p.Port.IntValue() == ChromiumProxyPort {
+			foundChromiumProxyIngress = true
 		}
 	}
 	if !foundChromiumIngress {
 		t.Error("chromium port not found in NetworkPolicy ingress ports")
 	}
+	if !foundChromiumProxyIngress {
+		t.Error("chromium proxy port not found in NetworkPolicy ingress ports")
+	}
 
-	// Egress: should have a rule for chromium CDP (self-traffic on port 9222)
+	// Egress: should have a rule for chromium CDP self-traffic (ports 9222 + 9223)
 	foundChromiumEgress := false
+	foundChromiumProxyEgress := false
 	for _, rule := range np.Spec.Egress {
 		for _, p := range rule.Ports {
 			if p.Port != nil && p.Port.IntValue() == ChromiumPort {
@@ -9352,12 +9359,17 @@ func TestBuildNetworkPolicy_ChromiumIngressAndEgress(t *testing.T) {
 				} else if rule.To[0].PodSelector == nil {
 					t.Error("chromium egress rule should use podSelector for self-traffic")
 				}
-				break
+			}
+			if p.Port != nil && p.Port.IntValue() == ChromiumProxyPort {
+				foundChromiumProxyEgress = true
 			}
 		}
 	}
 	if !foundChromiumEgress {
 		t.Error("chromium egress rule (port 9222) not found in NetworkPolicy")
+	}
+	if !foundChromiumProxyEgress {
+		t.Error("chromium proxy egress rule (port 9223) not found in NetworkPolicy")
 	}
 }
 
@@ -10399,5 +10411,155 @@ func TestPodRunAsNonRoot_Helper(t *testing.T) {
 				t.Errorf("podRunAsNonRoot() = %v, want %v", got, tt.expected)
 			}
 		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Chromium CDP proxy tests
+// ---------------------------------------------------------------------------
+
+func TestBuildStatefulSet_ChromiumProxySidecar(t *testing.T) {
+	instance := newTestInstance("cdp-proxy")
+	instance.Spec.Chromium.Enabled = true
+
+	sts := BuildStatefulSet(instance, "", nil)
+	initContainers := sts.Spec.Template.Spec.InitContainers
+
+	var proxy *corev1.Container
+	for i := range initContainers {
+		if initContainers[i].Name == "chromium-proxy" {
+			proxy = &initContainers[i]
+			break
+		}
+	}
+	if proxy == nil {
+		t.Fatal("chromium-proxy init container not found")
+	}
+
+	// Should be a native sidecar
+	if proxy.RestartPolicy == nil || *proxy.RestartPolicy != corev1.ContainerRestartPolicyAlways {
+		t.Error("chromium-proxy should have restartPolicy=Always (native sidecar)")
+	}
+
+	// Should use the same nginx image as the gateway proxy
+	if proxy.Image != DefaultGatewayProxyImage {
+		t.Errorf("expected image %s, got %s", DefaultGatewayProxyImage, proxy.Image)
+	}
+
+	// Should listen on the proxy port
+	if len(proxy.Ports) != 1 || proxy.Ports[0].ContainerPort != ChromiumProxyPort {
+		t.Errorf("expected port %d, got %v", ChromiumProxyPort, proxy.Ports)
+	}
+
+	// Should have startup probe on the proxy port
+	if proxy.StartupProbe == nil {
+		t.Fatal("chromium-proxy should have a startup probe")
+	}
+	if proxy.StartupProbe.HTTPGet.Port.IntValue() != int(ChromiumProxyPort) {
+		t.Errorf("startup probe should check port %d, got %d", ChromiumProxyPort, proxy.StartupProbe.HTTPGet.Port.IntValue())
+	}
+
+	// Should come AFTER the chromium (browserless) sidecar
+	chromiumIdx, proxyIdx := -1, -1
+	for i, c := range initContainers {
+		if c.Name == "chromium" {
+			chromiumIdx = i
+		}
+		if c.Name == "chromium-proxy" {
+			proxyIdx = i
+		}
+	}
+	if chromiumIdx < 0 || proxyIdx < 0 || proxyIdx <= chromiumIdx {
+		t.Errorf("chromium-proxy (idx %d) must come after chromium (idx %d)", proxyIdx, chromiumIdx)
+	}
+
+	// Should mount the proxy nginx config
+	foundConfig := false
+	for _, vm := range proxy.VolumeMounts {
+		if vm.SubPath == ChromiumProxyNginxConfigKey {
+			foundConfig = true
+			break
+		}
+	}
+	if !foundConfig {
+		t.Error("chromium-proxy should mount the proxy nginx config")
+	}
+}
+
+func TestBuildStatefulSet_ChromiumProxyNotPresentWhenDisabled(t *testing.T) {
+	instance := newTestInstance("no-cdp-proxy")
+	instance.Spec.Chromium.Enabled = false
+
+	sts := BuildStatefulSet(instance, "", nil)
+	for _, c := range sts.Spec.Template.Spec.InitContainers {
+		if c.Name == "chromium-proxy" {
+			t.Error("chromium-proxy should not be present when chromium is disabled")
+		}
+	}
+}
+
+func TestBuildConfigMap_ChromiumProxyNginxConfig(t *testing.T) {
+	instance := newTestInstance("cdp-cfg")
+	instance.Spec.Chromium.Enabled = true
+	instance.Spec.Chromium.ExtraArgs = []string{"--user-agent=Custom"}
+
+	cm := BuildConfigMap(instance, "", nil)
+	proxyConfig, ok := cm.Data[ChromiumProxyNginxConfigKey]
+	if !ok {
+		t.Fatal("ConfigMap should contain chromium proxy nginx config")
+	}
+
+	// Should contain the proxy port
+	if !strings.Contains(proxyConfig, fmt.Sprintf("listen 0.0.0.0:%d", ChromiumProxyPort)) {
+		t.Error("proxy config should listen on ChromiumProxyPort")
+	}
+
+	// Should proxy to the chromium port
+	if !strings.Contains(proxyConfig, fmt.Sprintf("proxy_pass http://127.0.0.1:%d", ChromiumPort)) {
+		t.Error("proxy config should forward to ChromiumPort")
+	}
+
+	// Should contain the default anti-bot flags (URL-encoded)
+	if !strings.Contains(proxyConfig, "disable-blink-features") {
+		t.Error("proxy config should contain anti-bot launch args")
+	}
+
+	// Should contain user ExtraArgs (URL-encoded)
+	if !strings.Contains(proxyConfig, "Custom") {
+		t.Error("proxy config should contain user ExtraArgs")
+	}
+
+	// Should have WebSocket upgrade headers
+	if !strings.Contains(proxyConfig, "proxy_set_header Upgrade") {
+		t.Error("proxy config should handle WebSocket upgrades")
+	}
+}
+
+func TestBuildConfigMap_NoChromiumProxyWhenDisabled(t *testing.T) {
+	instance := newTestInstance("no-cdp-cfg")
+	instance.Spec.Chromium.Enabled = false
+
+	cm := BuildConfigMap(instance, "", nil)
+	if _, ok := cm.Data[ChromiumProxyNginxConfigKey]; ok {
+		t.Error("ConfigMap should not contain chromium proxy config when chromium is disabled")
+	}
+}
+
+func TestBuildChromiumCDPService_TargetsProxyPort(t *testing.T) {
+	instance := newTestInstance("cdp-svc")
+	instance.Spec.Chromium.Enabled = true
+
+	svc := BuildChromiumCDPService(instance)
+
+	if len(svc.Spec.Ports) != 1 {
+		t.Fatalf("expected 1 port, got %d", len(svc.Spec.Ports))
+	}
+
+	port := svc.Spec.Ports[0]
+	if port.Port != int32(ChromiumPort) {
+		t.Errorf("service port should be %d (external CDP port), got %d", ChromiumPort, port.Port)
+	}
+	if port.TargetPort.IntValue() != int(ChromiumProxyPort) {
+		t.Errorf("target port should be %d (proxy), got %d", ChromiumProxyPort, port.TargetPort.IntValue())
 	}
 }

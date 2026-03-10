@@ -19,6 +19,7 @@ package resources
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"sort"
 
 	corev1 "k8s.io/api/core/v1"
@@ -107,6 +108,11 @@ func BuildConfigMapFromBytes(instance *openclawv1alpha1.OpenClawInstance, baseCo
 	// Add Tailscale serve config when enabled (sidecar reads this via TS_SERVE_CONFIG)
 	if instance.Spec.Tailscale.Enabled {
 		data[TailscaleServeConfigKey] = BuildTailscaleServeConfig(instance)
+	}
+
+	// Add chromium CDP proxy nginx config when enabled
+	if instance.Spec.Chromium.Enabled {
+		data[ChromiumProxyNginxConfigKey] = chromiumProxyNginxConfig(instance)
 	}
 
 	return &corev1.ConfigMap{
@@ -556,4 +562,55 @@ stream {
     }
 }
 `, GatewayProxyPort, GatewayPort, CanvasProxyPort, CanvasPort)
+}
+
+// chromiumProxyNginxConfig returns the nginx HTTP configuration for the
+// chromium CDP proxy sidecar. It sits between OpenClaw and the browserless
+// sidecar, injecting Chrome launch args (anti-bot flags + user ExtraArgs)
+// into every request via the `launch` query parameter. This is needed
+// because browserless v2 deprecated DEFAULT_LAUNCH_ARGS and only accepts
+// launch args per-request on the WebSocket URL.
+func chromiumProxyNginxConfig(instance *openclawv1alpha1.OpenClawInstance) string {
+	args := make([]string, 0, len(DefaultChromiumLaunchArgs)+len(instance.Spec.Chromium.ExtraArgs))
+	args = append(args, DefaultChromiumLaunchArgs...)
+	args = append(args, instance.Spec.Chromium.ExtraArgs...)
+
+	launchJSON, _ := json.Marshal(map[string]interface{}{"args": args})
+	encoded := url.QueryEscape(string(launchJSON))
+
+	return fmt.Sprintf(`worker_processes 1;
+pid /tmp/nginx.pid;
+error_log /dev/stderr warn;
+
+events {
+    worker_connections 64;
+}
+
+http {
+    map $is_args $launch_sep {
+        "?"     "&";
+        default "?";
+    }
+
+    map $http_upgrade $connection_upgrade {
+        default upgrade;
+        ''      close;
+    }
+
+    server {
+        listen 0.0.0.0:%d;
+
+        location / {
+            proxy_pass http://127.0.0.1:%d$request_uri${launch_sep}launch=%s;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection $connection_upgrade;
+            proxy_set_header Host $host;
+            proxy_buffering off;
+            proxy_read_timeout 86400s;
+            proxy_send_timeout 86400s;
+        }
+    }
+}
+`, ChromiumProxyPort, ChromiumPort, encoded)
 }
