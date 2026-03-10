@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.2](https://github.com/openclaw-rocks/k8s-operator/compare/v0.11.1...v0.11.2) (2026-03-10)
+
+
+### Bug Fixes
+
+* normalize ClawHub skill slugs and fix documentation ([f738e67](https://github.com/openclaw-rocks/k8s-operator/commit/f738e678893ca233d686f08b733ddf5e2b7fab8d))
+* normalize ClawHub skill slugs and fix documentation format ([ab4af55](https://github.com/openclaw-rocks/k8s-operator/commit/ab4af552427d87d9f1f521572b1986959eac475f)), closes [#288](https://github.com/openclaw-rocks/k8s-operator/issues/288)
+* update E2E test to expect normalized skill slug ([7f71bc9](https://github.com/openclaw-rocks/k8s-operator/commit/7f71bc9712a17fdba31efc268dc15fdbac449bf4))
+
 ## [0.11.1](https://github.com/openclaw-rocks/k8s-operator/compare/v0.11.0...v0.11.1) (2026-03-10)
 
 
