@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.30](https://github.com/openclaw-rocks/k8s-operator/compare/v0.10.29...v0.10.30) (2026-03-10)
+
+
+### Features
+
+* idempotent ClawHub skill installs for persistent storage ([b02c5f2](https://github.com/openclaw-rocks/k8s-operator/commit/b02c5f244315759afb0dfd55f2fd78754af7cd5b))
+
+
+### Bug Fixes
+
+* add activeDeadlineSeconds and startingDeadlineSeconds to backup CronJob ([d5a5a0a](https://github.com/openclaw-rocks/k8s-operator/commit/d5a5a0ad27a6928dce9a5118a89b785df64cfe17)), closes [#286](https://github.com/openclaw-rocks/k8s-operator/issues/286)
+* add deadline safeguards to backup CronJob ([5f3715d](https://github.com/openclaw-rocks/k8s-operator/commit/5f3715d77ecdef97f998b18a1ecabb4d15d9a680))
+* add K8s API port 6443 egress when tailscale is enabled ([5968cc1](https://github.com/openclaw-rocks/k8s-operator/commit/5968cc1cd28706cc811ed695cdeefacd5c6e2784))
+* inject POD_NAMESPACE env via Downward API ([b793c0f](https://github.com/openclaw-rocks/k8s-operator/commit/b793c0ff352abd1182a7e7d1847f3105a02aad94))
+* inject POD_NAMESPACE env via Downward API in operator deployment ([8b5ae53](https://github.com/openclaw-rocks/k8s-operator/commit/8b5ae53605cc1a79981ddeb9d95973bc3b5c92cd)), closes [#281](https://github.com/openclaw-rocks/k8s-operator/issues/281)
+
+## [0.10.29](https://github.com/openclaw-rocks/k8s-operator/compare/v0.10.28...v0.10.29) (2026-03-09)
+
+
+### Bug Fixes
+
+* increase chromium startup probe timeout from 2s to 5s ([#279](https://github.com/openclaw-rocks/k8s-operator/issues/279)) ([2ccf3ec](https://github.com/openclaw-rocks/k8s-operator/commit/2ccf3ec252daefa846e9c7c027dd40f870b996a6)), closes [#270](https://github.com/openclaw-rocks/k8s-operator/issues/270)
+
+## [0.10.28](https://github.com/openclaw-rocks/k8s-operator/compare/v0.10.27...v0.10.28) (2026-03-09)
+
+
+### Bug Fixes
+
+* auto-inject 127.0.0.0/8 into gateway.trustedProxies ([#276](https://github.com/openclaw-rocks/k8s-operator/issues/276)) ([e7ecc5c](https://github.com/openclaw-rocks/k8s-operator/commit/e7ecc5c6f1c50b1b6f26621b9e99d22266dadd34)), closes [#274](https://github.com/openclaw-rocks/k8s-operator/issues/274)
+* handle OCI pagination in registry tag resolver ([#275](https://github.com/openclaw-rocks/k8s-operator/issues/275)) ([2fcf3dd](https://github.com/openclaw-rocks/k8s-operator/commit/2fcf3dd41e2e3c24a440fed155019ae664b36255))
+
 ## [0.10.27](https://github.com/openclaw-rocks/k8s-operator/compare/v0.10.26...v0.10.27) (2026-03-09)
 
 

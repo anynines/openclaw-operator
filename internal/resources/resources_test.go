@@ -2374,6 +2374,171 @@ func TestEnrichConfigWithDeviceAuth_InvalidJSON(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// enrichConfigWithTrustedProxies tests
+// ---------------------------------------------------------------------------
+
+func TestEnrichConfigWithTrustedProxies(t *testing.T) {
+	input := []byte(`{}`)
+	out, err := enrichConfigWithTrustedProxies(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var cfg map[string]interface{}
+	if err := json.Unmarshal(out, &cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	gw, ok := cfg["gateway"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected gateway key")
+	}
+	proxies, ok := gw["trustedProxies"].([]interface{})
+	if !ok {
+		t.Fatal("expected gateway.trustedProxies array")
+	}
+	if len(proxies) != 1 || proxies[0] != "127.0.0.0/8" {
+		t.Errorf("gateway.trustedProxies = %v, want [127.0.0.0/8]", proxies)
+	}
+}
+
+func TestEnrichConfigWithTrustedProxies_MergesWithUserEntries(t *testing.T) {
+	input := []byte(`{"gateway":{"trustedProxies":["10.0.0.0/8"]}}`)
+	out, err := enrichConfigWithTrustedProxies(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var cfg map[string]interface{}
+	if err := json.Unmarshal(out, &cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	gw := cfg["gateway"].(map[string]interface{})
+	proxies := gw["trustedProxies"].([]interface{})
+	if len(proxies) != 2 {
+		t.Fatalf("expected 2 entries, got %d: %v", len(proxies), proxies)
+	}
+	if proxies[0] != "10.0.0.0/8" {
+		t.Errorf("proxies[0] = %v, want 10.0.0.0/8", proxies[0])
+	}
+	if proxies[1] != "127.0.0.0/8" {
+		t.Errorf("proxies[1] = %v, want 127.0.0.0/8", proxies[1])
+	}
+}
+
+func TestEnrichConfigWithTrustedProxies_SkipsIfAlreadyPresent(t *testing.T) {
+	input := []byte(`{"gateway":{"trustedProxies":["127.0.0.0/8","10.0.0.0/8"]}}`)
+	out, err := enrichConfigWithTrustedProxies(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var cfg map[string]interface{}
+	if err := json.Unmarshal(out, &cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	gw := cfg["gateway"].(map[string]interface{})
+	proxies := gw["trustedProxies"].([]interface{})
+	if len(proxies) != 2 {
+		t.Errorf("expected 2 entries (no duplicate), got %d: %v", len(proxies), proxies)
+	}
+}
+
+func TestEnrichConfigWithTrustedProxies_PreservesOtherFields(t *testing.T) {
+	input := []byte(`{"gateway":{"bind":"loopback","auth":{"mode":"token"}},"mcpServers":{}}`)
+	out, err := enrichConfigWithTrustedProxies(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var cfg map[string]interface{}
+	if err := json.Unmarshal(out, &cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	gw := cfg["gateway"].(map[string]interface{})
+	if gw["bind"] != "loopback" {
+		t.Errorf("gateway.bind should be preserved, got %v", gw["bind"])
+	}
+	if _, ok := gw["auth"].(map[string]interface{}); !ok {
+		t.Error("gateway.auth should be preserved")
+	}
+	if _, ok := cfg["mcpServers"]; !ok {
+		t.Error("mcpServers should be preserved")
+	}
+}
+
+func TestEnrichConfigWithTrustedProxies_InvalidJSON(t *testing.T) {
+	input := []byte(`not valid json`)
+	out, err := enrichConfigWithTrustedProxies(input)
+	if err != nil {
+		t.Fatal("should not error on invalid JSON")
+	}
+
+	if !bytes.Equal(out, input) {
+		t.Errorf("invalid JSON should be returned unchanged")
+	}
+}
+
+func TestBuildConfigMap_TrustedProxiesInjected(t *testing.T) {
+	instance := newTestInstance("cm-proxies-inject")
+	instance.Spec.Config.Raw = &openclawv1alpha1.RawConfig{
+		RawExtension: runtime.RawExtension{
+			Raw: []byte(`{}`),
+		},
+	}
+
+	cm := BuildConfigMap(instance, "", nil)
+	content := cm.Data["openclaw.json"]
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(content), &parsed); err != nil {
+		t.Fatalf("failed to parse config: %v", err)
+	}
+
+	gw, ok := parsed["gateway"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected gateway key")
+	}
+	proxies, ok := gw["trustedProxies"].([]interface{})
+	if !ok {
+		t.Fatal("expected gateway.trustedProxies")
+	}
+	if len(proxies) != 1 || proxies[0] != "127.0.0.0/8" {
+		t.Errorf("gateway.trustedProxies = %v, want [127.0.0.0/8]", proxies)
+	}
+}
+
+func TestBuildConfigMap_TrustedProxiesMergesWithUserConfig(t *testing.T) {
+	instance := newTestInstance("cm-proxies-merge")
+	instance.Spec.Config.Raw = &openclawv1alpha1.RawConfig{
+		RawExtension: runtime.RawExtension{
+			Raw: []byte(`{"gateway":{"trustedProxies":["10.0.0.0/8"]}}`),
+		},
+	}
+
+	cm := BuildConfigMap(instance, "", nil)
+	content := cm.Data["openclaw.json"]
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(content), &parsed); err != nil {
+		t.Fatalf("failed to parse config: %v", err)
+	}
+
+	gw := parsed["gateway"].(map[string]interface{})
+	proxies := gw["trustedProxies"].([]interface{})
+	if len(proxies) != 2 {
+		t.Fatalf("expected 2 entries, got %d: %v", len(proxies), proxies)
+	}
+	// User entry preserved, loopback appended
+	if proxies[0] != "10.0.0.0/8" || proxies[1] != "127.0.0.0/8" {
+		t.Errorf("gateway.trustedProxies = %v, want [10.0.0.0/8 127.0.0.0/8]", proxies)
+	}
+}
+
 func TestBuildConfigMap_RawConfig_GatewayBindInjected(t *testing.T) {
 	instance := newTestInstance("cm-bind-inject")
 	instance.Spec.Config.Raw = &openclawv1alpha1.RawConfig{
@@ -4618,7 +4783,7 @@ func TestBuildInitScript_MergeMode_NoConfig(t *testing.T) {
 
 func TestParseSkillEntry_ClawHub(t *testing.T) {
 	got := parseSkillEntry("@anthropic/mcp-server-fetch")
-	want := "npx -y clawhub install --force '@anthropic/mcp-server-fetch'"
+	want := "npx -y clawhub install '@anthropic/mcp-server-fetch'"
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
@@ -4654,15 +4819,16 @@ func TestBuildSkillsScript_WithSkills(t *testing.T) {
 
 	script := BuildSkillsScript(instance)
 
-	// Skills should be sorted
-	lines := strings.Split(script, "\n")
-	if len(lines) != 2 {
-		t.Fatalf("expected 2 lines, got %d: %q", len(lines), script)
+	if !strings.HasPrefix(script, "set -e\n") {
+		t.Error("script should start with set -e")
 	}
-	if lines[0] != "npx -y clawhub install --force '@anthropic/mcp-server-fetch'" {
+	if !strings.Contains(script, skillInstallWrapper) {
+		t.Error("script should contain the _install_skill wrapper")
+	}
+	if lines[0] != "npx -y clawhub install '@anthropic/mcp-server-fetch'" {
 		t.Errorf("line 0: %q", lines[0])
 	}
-	if lines[1] != "npx -y clawhub install --force '@github/copilot-skill'" {
+	if lines[1] != "npx -y clawhub install '@github/copilot-skill'" {
 		t.Errorf("line 1: %q", lines[1])
 	}
 }
@@ -4677,12 +4843,23 @@ func TestBuildSkillsScript_MixedPrefixes(t *testing.T) {
 
 	script := BuildSkillsScript(instance)
 
-	lines := strings.Split(script, "\n")
-	if len(lines) != 3 {
-		t.Fatalf("expected 3 lines, got %d: %q", len(lines), script)
+	if !strings.HasPrefix(script, "set -e\n") {
+		t.Error("script should start with set -e")
+	}
+	if !strings.Contains(script, skillInstallWrapper) {
+		t.Error("script should contain the _install_skill wrapper (has clawhub skills)")
+	}
+	if !strings.Contains(script, "_install_skill '@anthropic/mcp-server-fetch'") {
+		t.Error("script should contain _install_skill for clawhub skill")
+	}
+	if !strings.Contains(script, "cd /home/openclaw/.openclaw && npm install '@openclaw/matrix'") {
+		t.Error("script should contain npm install for @openclaw/matrix")
+	}
+	if !strings.Contains(script, "cd /home/openclaw/.openclaw && npm install 'some-tool'") {
+		t.Error("script should contain npm install for some-tool")
 	}
 	// Sorted: @anthropic/... < npm:@openclaw/... < npm:some-tool
-	if lines[0] != "npx -y clawhub install --force '@anthropic/mcp-server-fetch'" {
+	if lines[0] != "npx -y clawhub install '@anthropic/mcp-server-fetch'" {
 		t.Errorf("line 0: %q", lines[0])
 	}
 	if lines[1] != "cd /home/openclaw/.openclaw && npm install '@openclaw/matrix'" {
@@ -6555,27 +6732,36 @@ func TestBuildNetworkPolicy_TailscaleEgress(t *testing.T) {
 
 	np := BuildNetworkPolicy(instance)
 
-	// Default egress: DNS (0), HTTPS (1), Tailscale STUN+WireGuard (2)
-	if len(np.Spec.Egress) < 3 {
-		t.Fatalf("expected at least 3 egress rules, got %d", len(np.Spec.Egress))
+	// Default egress: DNS (0), HTTPS (1), K8s API 6443 (2), Tailscale STUN+WireGuard (3)
+	if len(np.Spec.Egress) < 4 {
+		t.Fatalf("expected at least 4 egress rules, got %d", len(np.Spec.Egress))
 	}
 
-	tsRule := np.Spec.Egress[2]
-	if len(tsRule.Ports) != 2 {
-		t.Fatalf("expected 2 Tailscale egress ports, got %d", len(tsRule.Ports))
-	}
-
+	// Verify K8s API port 6443 is included (tailscale needs it for state secret)
+	found6443 := false
 	foundSTUN := false
 	foundWG := false
-	for _, p := range tsRule.Ports {
-		if p.Protocol != nil && *p.Protocol == corev1.ProtocolUDP && p.Port != nil {
+	for _, rule := range np.Spec.Egress {
+		for _, p := range rule.Ports {
+			if p.Port == nil {
+				continue
+			}
 			switch p.Port.IntValue() {
+			case 6443:
+				found6443 = true
 			case 3478:
-				foundSTUN = true
+				if p.Protocol != nil && *p.Protocol == corev1.ProtocolUDP {
+					foundSTUN = true
+				}
 			case 41641:
-				foundWG = true
+				if p.Protocol != nil && *p.Protocol == corev1.ProtocolUDP {
+					foundWG = true
+				}
 			}
 		}
+	}
+	if !found6443 {
+		t.Error("expected K8s API egress rule (TCP 6443) for tailscale state secret")
 	}
 	if !foundSTUN {
 		t.Error("expected STUN egress rule (UDP 3478)")
@@ -8032,13 +8218,14 @@ func TestBuildNetworkPolicy_SelfConfigureEgress(t *testing.T) {
 
 func TestBuildNetworkPolicy_SelfConfigureDisabledNo6443(t *testing.T) {
 	instance := newTestInstance("sc-netpol-off")
+	// Both selfConfigure and tailscale are disabled by default
 
 	np := BuildNetworkPolicy(instance)
 
 	for _, rule := range np.Spec.Egress {
 		for _, port := range rule.Ports {
 			if port.Port != nil && port.Port.IntValue() == 6443 {
-				t.Error("NetworkPolicy should NOT have port 6443 when self-configure is disabled")
+				t.Error("NetworkPolicy should NOT have port 6443 when both self-configure and tailscale are disabled")
 			}
 		}
 	}
