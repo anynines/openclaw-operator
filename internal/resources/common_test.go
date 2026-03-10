@@ -25,6 +25,12 @@ func TestParseQuantity(t *testing.T) {
 			defaultValue: "100Mi",
 			expected:     resource.MustParse("100Mi"),
 		},
+		{
+			name:         "Empty input, falling back to default",
+			input:        "",
+			defaultValue: "100Mi",
+			expected:     resource.MustParse("100Mi"),
+		},
 	}
 
 	for _, tt := range tests {
