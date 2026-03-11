@@ -10623,9 +10623,9 @@ func TestBuildConfigMap_ChromiumProxyNginxConfig(t *testing.T) {
 		t.Error("proxy config should handle WebSocket upgrades")
 	}
 
-	// WebSocket connections should route to /chromium endpoint (not /devtools/)
-	if !strings.Contains(proxyConfig, fmt.Sprintf("proxy_pass http://127.0.0.1:%d/chromium?launch=", ChromiumPort)) {
-		t.Error("proxy config should route WebSocket to /chromium endpoint with launch args")
+	// WebSocket connections should rewrite to /chromium with launch args
+	if !strings.Contains(proxyConfig, "rewrite ^ /chromium?launch=") {
+		t.Error("proxy config should rewrite WebSocket requests to /chromium with launch args")
 	}
 
 	// Should use named location for WebSocket routing

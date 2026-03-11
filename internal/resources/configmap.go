@@ -607,7 +607,8 @@ http {
         # browserless v2 only applies launch args on the /chromium endpoint
         # (launches new Chrome), not /devtools/browser/ (existing Chrome).
         location @chromium_ws {
-            proxy_pass http://127.0.0.1:%d/chromium?launch=%s;
+            rewrite ^ /chromium?launch=%s break;
+            proxy_pass http://127.0.0.1:%d;
             proxy_http_version 1.1;
             proxy_set_header Upgrade $http_upgrade;
             proxy_set_header Connection "upgrade";
@@ -632,7 +633,7 @@ http {
         }
     }
 }
-`, ChromiumProxyPort, ChromiumPort, encoded, ChromiumPort)
+`, ChromiumProxyPort, encoded, ChromiumPort, ChromiumPort)
 }
 
 // deduplicateArgs merges default and extra Chrome launch args, removing
