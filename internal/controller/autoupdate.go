@@ -555,6 +555,11 @@ func (r *OpenClawInstanceReconciler) driveRollbackRestore(ctx context.Context, i
 		return ctrl.Result{}, false, fmt.Errorf("failed to get S3 credentials for rollback: %w", err)
 	}
 
+	// Reconcile mirror Secret for secretKeyRef (no-op for env-auth mode)
+	if err := r.reconcileS3MirrorSecret(ctx, instance, creds); err != nil {
+		return ctrl.Result{}, false, err
+	}
+
 	// Create or check restore job
 	jobName := rollbackRestoreJobName(instance)
 	existingJob, err := r.getJob(ctx, jobName, instance.Namespace)
@@ -566,7 +571,7 @@ func (r *OpenClawInstanceReconciler) driveRollbackRestore(ctx context.Context, i
 		pvcName := pvcNameForInstance(instance)
 		labels := backupLabels(instance, "rollback-restore")
 
-		job := buildRcloneJob(jobName, instance.Namespace, pvcName, backupPath, labels, creds, false, instance.Spec.Availability.NodeSelector, instance.Spec.Availability.Tolerations, instance.Spec.Backup.ServiceAccountName)
+		job := buildRcloneJob(jobName, instance.Namespace, pvcName, backupPath, labels, creds, false, instance.Spec.Availability.NodeSelector, instance.Spec.Availability.Tolerations, instance.Spec.Backup.ServiceAccountName, mirrorSecretName(instance))
 		if err := controllerutil.SetControllerReference(instance, job, r.Scheme); err != nil {
 			return ctrl.Result{}, false, err
 		}
@@ -697,6 +702,11 @@ func (r *OpenClawInstanceReconciler) drivePreUpdateBackup(ctx context.Context, i
 		return ctrl.Result{}, false, fmt.Errorf("failed to get S3 credentials: %w", err)
 	}
 
+	// Reconcile mirror Secret for secretKeyRef (no-op for env-auth mode)
+	if err := r.reconcileS3MirrorSecret(ctx, instance, creds); err != nil {
+		return ctrl.Result{}, false, err
+	}
+
 	// Create or check backup job
 	jobName := preUpdateBackupJobName(instance)
 	existingJob, err := r.getJob(ctx, jobName, instance.Namespace)
@@ -712,7 +722,7 @@ func (r *OpenClawInstanceReconciler) drivePreUpdateBackup(ctx context.Context, i
 		pvcName := pvcNameForInstance(instance)
 		labels := backupLabels(instance, "pre-update-backup")
 
-		job := buildRcloneJob(jobName, instance.Namespace, pvcName, b2Path, labels, creds, true, instance.Spec.Availability.NodeSelector, instance.Spec.Availability.Tolerations, instance.Spec.Backup.ServiceAccountName)
+		job := buildRcloneJob(jobName, instance.Namespace, pvcName, b2Path, labels, creds, true, instance.Spec.Availability.NodeSelector, instance.Spec.Availability.Tolerations, instance.Spec.Backup.ServiceAccountName, mirrorSecretName(instance))
 		if err := controllerutil.SetControllerReference(instance, job, r.Scheme); err != nil {
 			return ctrl.Result{}, false, err
 		}
