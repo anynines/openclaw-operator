@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.1](https://github.com/openclaw-rocks/k8s-operator/compare/v0.15.0...v0.15.1) (2026-03-12)
+
+
+### Bug Fixes
+
+* **backup:** use secretKeyRef instead of plaintext credentials in Job specs ([e45ef9c](https://github.com/openclaw-rocks/k8s-operator/commit/e45ef9c87f5b03463ca7811d55019be74ce02c53))
+* **backup:** use secretKeyRef instead of plaintext credentials in Job specs ([e4f2f4d](https://github.com/openclaw-rocks/k8s-operator/commit/e4f2f4d1bb27fb889d594f7f8dbaff3d6e707328)), closes [#322](https://github.com/openclaw-rocks/k8s-operator/issues/322)
+* resolve variable shadowing lint errors in mirror secret calls ([a673e60](https://github.com/openclaw-rocks/k8s-operator/commit/a673e605bda6767d9929ba811ac94a525d0685e7))
+
 ## [0.15.0](https://github.com/openclaw-rocks/k8s-operator/compare/v0.14.1...v0.15.0) (2026-03-12)
 
 
