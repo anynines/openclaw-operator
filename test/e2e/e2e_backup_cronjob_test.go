@@ -132,6 +132,28 @@ var _ = Describe("Periodic Backup CronJob", func() {
 			Expect(cronJob.Spec.JobTemplate.Spec.ActiveDeadlineSeconds).NotTo(BeNil())
 			Expect(*cronJob.Spec.JobTemplate.Spec.ActiveDeadlineSeconds).To(Equal(int64(3600)))
 
+			// Verify mirror Secret was created in instance namespace
+			mirrorSecret := &corev1.Secret{}
+			Eventually(func() error {
+				return k8sClient.Get(ctx, types.NamespacedName{
+					Name:      instanceName + "-s3-credentials",
+					Namespace: namespace,
+				}, mirrorSecret)
+			}, timeout, interval).Should(Succeed())
+			Expect(mirrorSecret.Data).To(HaveKey("S3_ACCESS_KEY_ID"))
+			Expect(mirrorSecret.Data).To(HaveKey("S3_SECRET_ACCESS_KEY"))
+
+			// Verify credentials use secretKeyRef (not plaintext in Job spec)
+			container := cronJob.Spec.JobTemplate.Spec.Template.Spec.Containers[0]
+			for _, e := range container.Env {
+				if e.Name == "S3_ACCESS_KEY_ID" || e.Name == "S3_SECRET_ACCESS_KEY" {
+					Expect(e.Value).To(BeEmpty(), "credential env var %s should not have plaintext Value", e.Name)
+					Expect(e.ValueFrom).NotTo(BeNil(), "credential env var %s should use ValueFrom", e.Name)
+					Expect(e.ValueFrom.SecretKeyRef).NotTo(BeNil())
+					Expect(e.ValueFrom.SecretKeyRef.Name).To(Equal(instanceName + "-s3-credentials"))
+				}
+			}
+
 			// Verify ScheduledBackupReady condition
 			Eventually(func() bool {
 				updatedInstance := &openclawv1alpha1.OpenClawInstance{}

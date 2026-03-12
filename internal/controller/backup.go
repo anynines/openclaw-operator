@@ -166,6 +166,11 @@ func (r *OpenClawInstanceReconciler) reconcileDeleteWithBackup(ctx context.Conte
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}
 
+	// Reconcile mirror Secret for secretKeyRef (no-op for env-auth mode)
+	if mirrorErr := r.reconcileS3MirrorSecret(ctx, instance, creds); mirrorErr != nil {
+		return ctrl.Result{}, mirrorErr
+	}
+
 	tenantID := getTenantID(instance)
 	timestamp := time.Now().UTC().Format("2006-01-02T150405Z")
 	b2Path := fmt.Sprintf("backups/%s/%s/%s", tenantID, instance.Name, timestamp)
@@ -192,7 +197,7 @@ func (r *OpenClawInstanceReconciler) reconcileDeleteWithBackup(ctx context.Conte
 
 		pvcName := pvcNameForInstance(instance)
 		labels := backupLabels(instance, "backup")
-		job := buildRcloneJob(jobName, instance.Namespace, pvcName, b2Path, labels, creds, true, instance.Spec.Availability.NodeSelector, instance.Spec.Availability.Tolerations, instance.Spec.Backup.ServiceAccountName)
+		job := buildRcloneJob(jobName, instance.Namespace, pvcName, b2Path, labels, creds, true, instance.Spec.Availability.NodeSelector, instance.Spec.Availability.Tolerations, instance.Spec.Backup.ServiceAccountName, mirrorSecretName(instance))
 
 		// Set owner reference so the Job is cleaned up with the instance
 		if err := controllerutil.SetControllerReference(instance, job, r.Scheme); err != nil {

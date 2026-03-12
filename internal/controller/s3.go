@@ -143,9 +143,51 @@ func (r *OpenClawInstanceReconciler) getS3Credentials(ctx context.Context) (*s3C
 	}, nil
 }
 
+// mirrorSecretName returns the name of the per-instance mirror Secret that holds
+// S3 credentials in the instance namespace (so Jobs can use secretKeyRef).
+func mirrorSecretName(instance *openclawv1alpha1.OpenClawInstance) string {
+	return instance.Name + "-s3-credentials" // #nosec G101 -- not a credential, just a Secret resource name
+}
+
+// reconcileS3MirrorSecret creates or updates a mirror of the S3 credentials
+// in the instance namespace. This allows Jobs/CronJobs to reference credentials
+// via secretKeyRef instead of embedding plaintext values in the Job spec.
+// The mirror Secret is owned by the instance and garbage-collected on deletion.
+// For env-auth (workload identity) mode, no mirror is needed.
+func (r *OpenClawInstanceReconciler) reconcileS3MirrorSecret(ctx context.Context, instance *openclawv1alpha1.OpenClawInstance, creds *s3Credentials) error {
+	if creds.EnvAuth {
+		return nil
+	}
+
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      mirrorSecretName(instance),
+			Namespace: instance.Namespace,
+		},
+	}
+	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, secret, func() error {
+		secret.Labels = map[string]string{
+			LabelManagedBy: "openclaw-operator",
+			LabelInstance:  instance.Name,
+		}
+		secret.Data = map[string][]byte{
+			"S3_ACCESS_KEY_ID":     []byte(creds.KeyID),
+			"S3_SECRET_ACCESS_KEY": []byte(creds.AppKey),
+		}
+		return controllerutil.SetControllerReference(instance, secret, r.Scheme)
+	})
+	if err != nil {
+		return fmt.Errorf("failed to reconcile S3 mirror secret: %w", err)
+	}
+	return nil
+}
+
 // buildRcloneJob creates a batch/v1 Job that runs rclone to sync data between a PVC and S3.
 // For backup: src=PVC mount, dst=S3 remote path
 // For restore: src=S3 remote path, dst=PVC mount
+// credentialSecretName is the name of the Secret in the Job's namespace containing
+// S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY (used via secretKeyRef to avoid plaintext
+// credentials in the Job spec). Ignored when creds.EnvAuth is true.
 func buildRcloneJob(
 	name, namespace, pvcName string,
 	remotePath string,
@@ -155,6 +197,7 @@ func buildRcloneJob(
 	nodeSelector map[string]string,
 	tolerations []corev1.Toleration,
 	serviceAccountName string,
+	credentialSecretName string,
 ) *batchv1.Job {
 	backoffLimit := int32(3)
 	ttl := int32(86400) // 24h
@@ -191,8 +234,24 @@ func buildRcloneJob(
 	}
 	if !creds.EnvAuth {
 		env = append(env,
-			corev1.EnvVar{Name: "S3_ACCESS_KEY_ID", Value: creds.KeyID},
-			corev1.EnvVar{Name: "S3_SECRET_ACCESS_KEY", Value: creds.AppKey},
+			corev1.EnvVar{
+				Name: "S3_ACCESS_KEY_ID",
+				ValueFrom: &corev1.EnvVarSource{
+					SecretKeyRef: &corev1.SecretKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{Name: credentialSecretName},
+						Key:                  "S3_ACCESS_KEY_ID",
+					},
+				},
+			},
+			corev1.EnvVar{
+				Name: "S3_SECRET_ACCESS_KEY",
+				ValueFrom: &corev1.EnvVarSource{
+					SecretKeyRef: &corev1.SecretKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{Name: credentialSecretName},
+						Key:                  "S3_SECRET_ACCESS_KEY",
+					},
+				},
+			},
 		)
 	}
 	if creds.Region != "" {
@@ -314,14 +373,31 @@ func backupCronJobName(instance *openclawv1alpha1.OpenClawInstance) string {
 
 // rcloneCronJobEnv returns the environment variables for the rclone CronJob container.
 // When creds.EnvAuth is true, static credential env vars are omitted.
-func rcloneCronJobEnv(creds *s3Credentials) []corev1.EnvVar {
+// credentialSecretName is the mirror Secret name used via secretKeyRef.
+func rcloneCronJobEnv(creds *s3Credentials, credentialSecretName string) []corev1.EnvVar {
 	env := []corev1.EnvVar{
 		{Name: "S3_ENDPOINT", Value: creds.Endpoint},
 	}
 	if !creds.EnvAuth {
 		env = append(env,
-			corev1.EnvVar{Name: "S3_ACCESS_KEY_ID", Value: creds.KeyID},
-			corev1.EnvVar{Name: "S3_SECRET_ACCESS_KEY", Value: creds.AppKey},
+			corev1.EnvVar{
+				Name: "S3_ACCESS_KEY_ID",
+				ValueFrom: &corev1.EnvVarSource{
+					SecretKeyRef: &corev1.SecretKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{Name: credentialSecretName},
+						Key:                  "S3_ACCESS_KEY_ID",
+					},
+				},
+			},
+			corev1.EnvVar{
+				Name: "S3_SECRET_ACCESS_KEY",
+				ValueFrom: &corev1.EnvVarSource{
+					SecretKeyRef: &corev1.SecretKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{Name: credentialSecretName},
+						Key:                  "S3_SECRET_ACCESS_KEY",
+					},
+				},
+			},
 		)
 	}
 	return env
@@ -330,9 +406,12 @@ func rcloneCronJobEnv(creds *s3Credentials) []corev1.EnvVar {
 // buildBackupCronJob creates a batch/v1 CronJob for periodic S3 backups.
 // The CronJob mounts the PVC read-only and uses pod affinity to co-locate
 // on the same node as the StatefulSet pod (required for RWO PVCs).
+// credentialSecretName is the mirror Secret name used via secretKeyRef
+// (ignored when creds.EnvAuth is true).
 func buildBackupCronJob(
 	instance *openclawv1alpha1.OpenClawInstance,
 	creds *s3Credentials,
+	credentialSecretName string,
 ) *batchv1.CronJob {
 	name := backupCronJobName(instance)
 	labels := backupLabels(instance, "periodic-backup")
@@ -434,7 +513,7 @@ func buildBackupCronJob(
 									Image:           RcloneImage,
 									ImagePullPolicy: corev1.PullIfNotPresent,
 									Command:         []string{"sh", "-c", rcloneCmd},
-									Env:             rcloneCronJobEnv(creds),
+									Env:             rcloneCronJobEnv(creds, credentialSecretName),
 									VolumeMounts: []corev1.VolumeMount{
 										{
 											Name:      "data",
@@ -501,8 +580,13 @@ func (r *OpenClawInstanceReconciler) reconcileBackupCronJob(ctx context.Context,
 		return nil
 	}
 
+	// Reconcile mirror Secret for secretKeyRef (no-op for env-auth mode)
+	if err := r.reconcileS3MirrorSecret(ctx, instance, creds); err != nil {
+		return err
+	}
+
 	// Build desired CronJob
-	desired := buildBackupCronJob(instance, creds)
+	desired := buildBackupCronJob(instance, creds, mirrorSecretName(instance))
 
 	// CreateOrUpdate the CronJob
 	obj := &batchv1.CronJob{
