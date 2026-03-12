@@ -69,9 +69,14 @@ func BuildStatefulSet(instance *openclawv1alpha1.OpenClawInstance, gatewayTokenS
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: labels,
-					Annotations: map[string]string{
-						"openclaw.rocks/config-hash": configHash,
-					},
+					Annotations: func() map[string]string {
+						a := make(map[string]string, len(instance.Spec.PodAnnotations)+1)
+						for k, v := range instance.Spec.PodAnnotations {
+							a[k] = v
+						}
+						a["openclaw.rocks/config-hash"] = configHash
+						return a
+					}(),
 				},
 				Spec: corev1.PodSpec{
 					ServiceAccountName:            ServiceAccountName(instance),

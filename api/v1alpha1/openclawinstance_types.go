@@ -148,6 +148,11 @@ type OpenClawInstanceSpec struct {
 	// When enabled, the operator injects RBAC, env vars, and a helper skill into the workspace.
 	// +optional
 	SelfConfigure SelfConfigureSpec `json:"selfConfigure,omitempty"`
+
+	// PodAnnotations are extra annotations merged into the pod template metadata.
+	// Operator-managed annotations (e.g. config-hash) take precedence on conflict.
+	// +optional
+	PodAnnotations map[string]string `json:"podAnnotations,omitempty"`
 }
 
 // ImageSpec defines the container image configuration
