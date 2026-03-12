@@ -114,7 +114,7 @@ var _ = Describe("S3 Helpers", func() {
 				},
 			}
 			labels := backupLabels(instance, "backup")
-			job := buildRcloneJob("myinst-backup", "oc-tenant-t1", "myinst-data", "backups/t1/myinst/2026-01-01T000000Z", labels, creds, true, nil, nil)
+			job := buildRcloneJob("myinst-backup", "oc-tenant-t1", "myinst-data", "backups/t1/myinst/2026-01-01T000000Z", labels, creds, true, nil, nil, "")
 
 			Expect(job.Name).To(Equal("myinst-backup"))
 			Expect(job.Namespace).To(Equal("oc-tenant-t1"))
@@ -149,6 +149,9 @@ var _ = Describe("S3 Helpers", func() {
 			for _, arg := range container.Args {
 				Expect(arg).NotTo(HavePrefix("--s3-region"))
 			}
+
+			// Verify no ServiceAccountName when not set
+			Expect(job.Spec.Template.Spec.ServiceAccountName).To(BeEmpty())
 		})
 
 		It("Should build a restore Job with S3 as source", func() {
@@ -159,7 +162,7 @@ var _ = Describe("S3 Helpers", func() {
 				},
 			}
 			labels := backupLabels(instance, "restore")
-			job := buildRcloneJob("myinst-restore", "oc-tenant-t1", "myinst-data", "backups/t1/myinst/2026-01-01T000000Z", labels, creds, false, nil, nil)
+			job := buildRcloneJob("myinst-restore", "oc-tenant-t1", "myinst-data", "backups/t1/myinst/2026-01-01T000000Z", labels, creds, false, nil, nil, "")
 
 			container := job.Spec.Template.Spec.Containers[0]
 			Expect(container.Args[0]).To(Equal("sync"))
@@ -187,7 +190,7 @@ var _ = Describe("S3 Helpers", func() {
 				},
 			}
 			labels := backupLabels(instance, "backup")
-			job := buildRcloneJob("myinst-backup", "oc-tenant-t1", "myinst-data", "backups/t1/myinst/2026-01-01T000000Z", labels, creds, true, nodeSelector, tolerations)
+			job := buildRcloneJob("myinst-backup", "oc-tenant-t1", "myinst-data", "backups/t1/myinst/2026-01-01T000000Z", labels, creds, true, nodeSelector, tolerations, "")
 
 			Expect(job.Spec.Template.Spec.NodeSelector).To(Equal(nodeSelector))
 			Expect(job.Spec.Template.Spec.Tolerations).To(HaveLen(1))
@@ -204,7 +207,7 @@ var _ = Describe("S3 Helpers", func() {
 				},
 			}
 			labels := backupLabels(instance, "backup")
-			job := buildRcloneJob("myinst-backup", "oc-tenant-t1", "myinst-data", "backups/t1/myinst/2026-01-01T000000Z", labels, creds, true, nil, nil)
+			job := buildRcloneJob("myinst-backup", "oc-tenant-t1", "myinst-data", "backups/t1/myinst/2026-01-01T000000Z", labels, creds, true, nil, nil, "")
 
 			container := job.Spec.Template.Spec.Containers[0]
 
@@ -221,6 +224,55 @@ var _ = Describe("S3 Helpers", func() {
 			}
 			Expect(regionEnv).NotTo(BeNil())
 			Expect(regionEnv.Value).To(Equal("eu-west-1"))
+		})
+
+		It("Should use --s3-env-auth=true and omit static credential args/env when EnvAuth is true", func() {
+			envAuthCreds := &s3Credentials{
+				Bucket:   "test-bucket",
+				Endpoint: "https://s3.us-east-1.amazonaws.com",
+				EnvAuth:  true,
+			}
+			instance := &openclawv1alpha1.OpenClawInstance{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "myinst",
+					Namespace: "oc-tenant-t1",
+				},
+			}
+			labels := backupLabels(instance, "backup")
+			job := buildRcloneJob("myinst-backup", "oc-tenant-t1", "myinst-data", "backups/t1/myinst/2026-01-01T000000Z", labels, envAuthCreds, true, nil, nil, "")
+
+			container := job.Spec.Template.Spec.Containers[0]
+
+			// Verify --s3-env-auth=true is present
+			Expect(container.Args).To(ContainElement("--s3-env-auth=true"))
+
+			// Verify static credential flags are NOT present
+			for _, arg := range container.Args {
+				Expect(arg).NotTo(HavePrefix("--s3-access-key-id"))
+				Expect(arg).NotTo(HavePrefix("--s3-secret-access-key"))
+			}
+
+			// Verify only S3_ENDPOINT env var is set (no static cred env vars)
+			var envNames []string
+			for _, e := range container.Env {
+				envNames = append(envNames, e.Name)
+			}
+			Expect(envNames).To(ContainElement("S3_ENDPOINT"))
+			Expect(envNames).NotTo(ContainElement("S3_ACCESS_KEY_ID"))
+			Expect(envNames).NotTo(ContainElement("S3_SECRET_ACCESS_KEY"))
+		})
+
+		It("Should set ServiceAccountName on the Job pod when provided", func() {
+			instance := &openclawv1alpha1.OpenClawInstance{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "myinst",
+					Namespace: "oc-tenant-t1",
+				},
+			}
+			labels := backupLabels(instance, "backup")
+			job := buildRcloneJob("myinst-backup", "oc-tenant-t1", "myinst-data", "backups/t1/myinst/2026-01-01T000000Z", labels, creds, true, nil, nil, "my-irsa-sa")
+
+			Expect(job.Spec.Template.Spec.ServiceAccountName).To(Equal("my-irsa-sa"))
 		})
 	})
 
@@ -466,6 +518,43 @@ var _ = Describe("S3 Helpers", func() {
 			cronJob := buildBackupCronJob(instance, creds)
 			Expect(cronJob.Spec.StartingDeadlineSeconds).NotTo(BeNil())
 			Expect(*cronJob.Spec.StartingDeadlineSeconds).To(Equal(int64(600)))
+		})
+
+		It("Should use --s3-env-auth=true in rclone command and omit static cred env vars when EnvAuth is true", func() {
+			envAuthCreds := &s3Credentials{
+				Bucket:   "test-bucket",
+				Endpoint: "https://s3.us-east-1.amazonaws.com",
+				EnvAuth:  true,
+			}
+			cronJob := buildBackupCronJob(instance, envAuthCreds)
+			container := cronJob.Spec.JobTemplate.Spec.Template.Spec.Containers[0]
+
+			// Verify rclone command uses --s3-env-auth=true
+			Expect(container.Command[2]).To(ContainSubstring("--s3-env-auth=true"))
+			Expect(container.Command[2]).NotTo(ContainSubstring("--s3-access-key-id"))
+			Expect(container.Command[2]).NotTo(ContainSubstring("--s3-secret-access-key"))
+
+			// Verify only S3_ENDPOINT env var is set
+			var envNames []string
+			for _, e := range container.Env {
+				envNames = append(envNames, e.Name)
+			}
+			Expect(envNames).To(ContainElement("S3_ENDPOINT"))
+			Expect(envNames).NotTo(ContainElement("S3_ACCESS_KEY_ID"))
+			Expect(envNames).NotTo(ContainElement("S3_SECRET_ACCESS_KEY"))
+		})
+
+		It("Should set ServiceAccountName on CronJob pod when spec.backup.serviceAccountName is set", func() {
+			instance.Spec.Backup.ServiceAccountName = "my-irsa-sa"
+			cronJob := buildBackupCronJob(instance, creds)
+			podSpec := cronJob.Spec.JobTemplate.Spec.Template.Spec
+			Expect(podSpec.ServiceAccountName).To(Equal("my-irsa-sa"))
+		})
+
+		It("Should leave ServiceAccountName empty when spec.backup.serviceAccountName is not set", func() {
+			cronJob := buildBackupCronJob(instance, creds)
+			podSpec := cronJob.Spec.JobTemplate.Spec.Template.Spec
+			Expect(podSpec.ServiceAccountName).To(BeEmpty())
 		})
 	})
 })

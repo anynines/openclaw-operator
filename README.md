@@ -676,12 +676,14 @@ metadata:
 stringData:
   S3_ENDPOINT: "https://s3.us-east-1.amazonaws.com"
   S3_BUCKET: "my-openclaw-backups"
-  S3_ACCESS_KEY_ID: "<key-id>"
-  S3_SECRET_ACCESS_KEY: "<secret-key>"
+  S3_ACCESS_KEY_ID: "<key-id>"            # optional - omit for IRSA/Pod Identity
+  S3_SECRET_ACCESS_KEY: "<secret-key>"    # optional - omit for IRSA/Pod Identity
   # S3_REGION: "us-east-1"  # optional - needed for MinIO or providers with custom regions
 ```
 
 Compatible with AWS S3, Backblaze B2, Cloudflare R2, MinIO, Wasabi, and any S3-compatible API.
+
+**IRSA / Pod Identity (AWS):** Omit `S3_ACCESS_KEY_ID` and `S3_SECRET_ACCESS_KEY` to use the AWS SDK credential chain. Set `spec.backup.serviceAccountName` to an IRSA-annotated or Pod Identity-enabled ServiceAccount so backup Jobs inherit the IAM role. See the [IRSA / Pod Identity section](docs/api-reference.md#irsa--pod-identity-aws) in the API reference for a full example.
 
 **When backups run automatically:**
 
@@ -700,6 +702,7 @@ spec:
     historyLimit: 3          # Successful job runs to retain (default: 3)
     failedHistoryLimit: 1    # Failed job runs to retain (default: 1)
     timeout: "30m"           # Max time for pre-delete backup (default: 30m, min: 5m, max: 24h)
+    serviceAccountName: ""   # Optional: IRSA/Pod Identity SA for backup Jobs
 ```
 
 The operator creates a Kubernetes CronJob that runs rclone to sync PVC data to S3. The CronJob mounts the PVC read-only (hot backup - no downtime) and uses pod affinity to co-locate on the same node as the StatefulSet pod (required for RWO PVCs). Each run stores data under a unique timestamped path: `backups/<tenantId>/<instanceName>/periodic/<timestamp>`.
