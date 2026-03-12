@@ -757,9 +757,7 @@ func (r *OpenClawInstanceReconciler) reconcileWorkspaceConfigMap(ctx context.Con
 // reconcilePVC reconciles the PersistentVolumeClaim
 func (r *OpenClawInstanceReconciler) reconcilePVC(ctx context.Context, instance *openclawv1alpha1.OpenClawInstance) error {
 	// Check if persistence is enabled
-	enabled := instance.Spec.Storage.Persistence.Enabled == nil || *instance.Spec.Storage.Persistence.Enabled
-
-	if !enabled {
+	if !resources.IsPersistenceEnabled(instance) {
 		instance.Status.ManagedResources.PVC = ""
 		return nil
 	}

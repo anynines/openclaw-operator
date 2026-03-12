@@ -97,8 +97,7 @@ func BuildStatefulSet(instance *openclawv1alpha1.OpenClawInstance, gatewayTokenS
 
 	// When persistence is enabled with HPA (multi-replica), use VolumeClaimTemplates
 	// so each replica gets its own PVC instead of sharing a single static PVC.
-	persistenceEnabled := instance.Spec.Storage.Persistence.Enabled == nil || *instance.Spec.Storage.Persistence.Enabled
-	if persistenceEnabled && IsHPAEnabled(instance) {
+	if IsPersistenceEnabled(instance) && IsHPAEnabled(instance) {
 		size := ParseQuantity(instance.Spec.Storage.Persistence.Size, "10Gi")
 		accessModes := instance.Spec.Storage.Persistence.AccessModes
 		if len(accessModes) == 0 {
@@ -1781,12 +1780,11 @@ func buildVolumes(instance *openclawv1alpha1.OpenClawInstance, skillPacks *Resol
 	volumes := []corev1.Volume{}
 
 	// Data volume (PVC or emptyDir)
-	persistenceEnabled := instance.Spec.Storage.Persistence.Enabled == nil || *instance.Spec.Storage.Persistence.Enabled
 	switch {
-	case persistenceEnabled && IsHPAEnabled(instance):
+	case IsPersistenceEnabled(instance) && IsHPAEnabled(instance):
 		// VolumeClaimTemplates handle per-replica PVCs - the StatefulSet
 		// controller auto-creates a volume named "data" for each pod.
-	case persistenceEnabled:
+	case IsPersistenceEnabled(instance):
 		pvcName := PVCName(instance)
 		if instance.Spec.Storage.Persistence.ExistingClaim != "" {
 			pvcName = instance.Spec.Storage.Persistence.ExistingClaim
