@@ -4874,7 +4874,7 @@ func TestParseSkillEntry_ClawHub_BareSlug(t *testing.T) {
 
 func TestParseSkillEntry_Npm(t *testing.T) {
 	got := parseSkillEntry("npm:@openclaw/matrix")
-	want := "cd /home/openclaw/.openclaw && npm install '@openclaw/matrix'"
+	want := "npm install -g '@openclaw/matrix'"
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
@@ -4882,7 +4882,7 @@ func TestParseSkillEntry_Npm(t *testing.T) {
 
 func TestParseSkillEntry_NpmUnscoped(t *testing.T) {
 	got := parseSkillEntry("npm:some-package")
-	want := "cd /home/openclaw/.openclaw && npm install 'some-package'"
+	want := "npm install -g 'some-package'"
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
@@ -4941,11 +4941,11 @@ func TestBuildSkillsScript_MixedPrefixes(t *testing.T) {
 	if !strings.Contains(script, "_install_skill 'mcp-server-fetch'") {
 		t.Error("script should contain _install_skill for clawhub skill (normalized)")
 	}
-	if !strings.Contains(script, "cd /home/openclaw/.openclaw && npm install '@openclaw/matrix'") {
-		t.Error("script should contain npm install for @openclaw/matrix")
+	if !strings.Contains(script, "npm install -g '@openclaw/matrix'") {
+		t.Error("script should contain npm install -g for @openclaw/matrix")
 	}
-	if !strings.Contains(script, "cd /home/openclaw/.openclaw && npm install 'some-tool'") {
-		t.Error("script should contain npm install for some-tool")
+	if !strings.Contains(script, "npm install -g 'some-tool'") {
+		t.Error("script should contain npm install -g for some-tool")
 	}
 }
 
@@ -5139,11 +5139,11 @@ func TestBuildStatefulSet_WithSkills_EnvAndEnvFromPropagated(t *testing.T) {
 
 	// Hardcoded env vars should come first (take precedence)
 	names := envNames(skillsContainer.Env)
-	if len(names) < 4 {
-		t.Fatalf("expected at least 4 env vars, got %d: %v", len(names), names)
+	if len(names) < 5 {
+		t.Fatalf("expected at least 5 env vars, got %d: %v", len(names), names)
 	}
-	if names[0] != "HOME" || names[1] != "NPM_CONFIG_CACHE" || names[2] != "NPM_CONFIG_IGNORE_SCRIPTS" {
-		t.Errorf("hardcoded env vars should come first, got %v", names[:3])
+	if names[0] != "HOME" || names[1] != "NPM_CONFIG_CACHE" || names[2] != "NPM_CONFIG_PREFIX" || names[3] != "NPM_CONFIG_IGNORE_SCRIPTS" {
+		t.Errorf("hardcoded env vars should come first, got %v", names[:4])
 	}
 
 	// User-defined env var should be appended after hardcoded ones
@@ -5217,6 +5217,119 @@ func TestBuildStatefulSet_ClawHubSkills_MainContainerSkillsMount(t *testing.T) {
 	}
 	if !found {
 		t.Error("main container should have /app/skills volume mount for ClawHub skills")
+	}
+}
+
+func TestBuildStatefulSet_NpmSkills_PathIncludesLocalBin(t *testing.T) {
+	instance := newTestInstance("npm-path")
+	instance.Spec.Skills = []string{"npm:mcporter"}
+
+	sts := BuildStatefulSet(instance, "", nil)
+	main := sts.Spec.Template.Spec.Containers[0]
+
+	var pathVar *corev1.EnvVar
+	for i := range main.Env {
+		if main.Env[i].Name == "PATH" {
+			pathVar = &main.Env[i]
+			break
+		}
+	}
+	if pathVar == nil {
+		t.Fatal("PATH env var should be set when npm skills are configured")
+	}
+	if !strings.Contains(pathVar.Value, RuntimeDepsLocalBin) {
+		t.Errorf("PATH should contain %q for npm skill binaries, got %q", RuntimeDepsLocalBin, pathVar.Value)
+	}
+}
+
+func TestBuildStatefulSet_ClawHubOnlySkills_NoPathOverride(t *testing.T) {
+	instance := newTestInstance("clawhub-no-path")
+	instance.Spec.Skills = []string{"@anthropic/mcp-server-fetch"}
+
+	sts := BuildStatefulSet(instance, "", nil)
+	main := sts.Spec.Template.Spec.Containers[0]
+
+	for i := range main.Env {
+		if main.Env[i].Name == "PATH" {
+			t.Errorf("PATH should not be set for clawhub-only skills (no runtime deps), got %q", main.Env[i].Value)
+			return
+		}
+	}
+}
+
+func TestBuildStatefulSet_MixedSkills_PathIncludesLocalBin(t *testing.T) {
+	instance := newTestInstance("mixed-skills-path")
+	instance.Spec.Skills = []string{"@anthropic/mcp-server-fetch", "npm:mcporter"}
+
+	sts := BuildStatefulSet(instance, "", nil)
+	main := sts.Spec.Template.Spec.Containers[0]
+
+	var pathVar *corev1.EnvVar
+	for i := range main.Env {
+		if main.Env[i].Name == "PATH" {
+			pathVar = &main.Env[i]
+			break
+		}
+	}
+	if pathVar == nil {
+		t.Fatal("PATH env var should be set when npm skills are configured")
+	}
+	if !strings.Contains(pathVar.Value, RuntimeDepsLocalBin) {
+		t.Errorf("PATH should contain %q, got %q", RuntimeDepsLocalBin, pathVar.Value)
+	}
+}
+
+func TestBuildStatefulSet_NpmSkills_InitContainerUsesGlobalInstall(t *testing.T) {
+	instance := newTestInstance("npm-global")
+	instance.Spec.Skills = []string{"npm:mcporter"}
+
+	sts := BuildStatefulSet(instance, "", nil)
+
+	var skillsContainer *corev1.Container
+	for i := range sts.Spec.Template.Spec.InitContainers {
+		if sts.Spec.Template.Spec.InitContainers[i].Name == "init-skills" {
+			skillsContainer = &sts.Spec.Template.Spec.InitContainers[i]
+			break
+		}
+	}
+	if skillsContainer == nil {
+		t.Fatal("init-skills container not found")
+	}
+
+	// Should use npm install -g (global), not local install
+	script := skillsContainer.Command[2]
+	if !strings.Contains(script, "npm install -g") {
+		t.Errorf("expected global npm install in script, got: %q", script)
+	}
+
+	// NPM_CONFIG_PREFIX should redirect global installs to PVC .local dir
+	envMap := map[string]string{}
+	for _, e := range skillsContainer.Env {
+		envMap[e.Name] = e.Value
+	}
+	if envMap["NPM_CONFIG_PREFIX"] != "/home/openclaw/.openclaw/.local" {
+		t.Errorf("NPM_CONFIG_PREFIX = %q, want %q", envMap["NPM_CONFIG_PREFIX"], "/home/openclaw/.openclaw/.local")
+	}
+}
+
+func TestHasNpmSkills(t *testing.T) {
+	tests := []struct {
+		name   string
+		skills []string
+		want   bool
+	}{
+		{"empty", nil, false},
+		{"clawhub only", []string{"@anthropic/fetch"}, false},
+		{"npm only", []string{"npm:mcporter"}, true},
+		{"mixed", []string{"@anthropic/fetch", "npm:mcporter"}, true},
+		{"pack only", []string{"pack:owner/repo/path"}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := hasNpmSkills(tt.skills); got != tt.want {
+				t.Errorf("hasNpmSkills(%v) = %v, want %v", tt.skills, got, tt.want)
+			}
+		})
 	}
 }
 

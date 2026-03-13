@@ -443,16 +443,18 @@ func buildMainEnv(instance *openclawv1alpha1.OpenClawInstance, gatewayTokenSecre
 		)
 	}
 
-	// Build custom PATH with optional prefixes for runtime deps and Tailscale CLI
+	// Build custom PATH with optional prefixes for runtime deps, Tailscale CLI,
+	// and npm-installed skill binaries (#335)
 	hasRuntimeDeps := instance.Spec.RuntimeDeps.Pnpm || instance.Spec.RuntimeDeps.Python
 	hasTailscale := instance.Spec.Tailscale.Enabled
-	if hasRuntimeDeps || hasTailscale {
+	hasNpmBins := hasNpmSkills(instance.Spec.Skills)
+	if hasRuntimeDeps || hasTailscale || hasNpmBins {
 		basePath := "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 		var prefixes []string
 		if hasTailscale {
 			prefixes = append(prefixes, TailscaleBinPath)
 		}
-		if hasRuntimeDeps {
+		if hasRuntimeDeps || hasNpmBins {
 			prefixes = append(prefixes, RuntimeDepsLocalBin)
 		}
 		env = append(env, corev1.EnvVar{
@@ -757,12 +759,13 @@ func normalizeClawHubSlug(entry string) string {
 }
 
 // parseSkillEntry returns the shell command to install a single skill entry.
-// Entries prefixed with "npm:" are installed via `npm install` into the PVC
-// node_modules. All other entries use the _install_skill wrapper around
-// `npx -y clawhub install`.
+// Entries prefixed with "npm:" are installed globally via `npm install -g`
+// so that binaries land in ~/.local/bin (via NPM_CONFIG_PREFIX) alongside
+// uv, pnpm, and other tools (#335). All other entries use the _install_skill
+// wrapper around `npx -y clawhub install`.
 func parseSkillEntry(entry string) string {
 	if pkg, ok := strings.CutPrefix(entry, "npm:"); ok {
-		return fmt.Sprintf("cd /home/openclaw/.openclaw && npm install %s", shellQuote(pkg))
+		return fmt.Sprintf("npm install -g %s", shellQuote(pkg))
 	}
 	return fmt.Sprintf("_install_skill %s", shellQuote(normalizeClawHubSlug(entry)))
 }
@@ -771,6 +774,16 @@ func parseSkillEntry(entry string) string {
 func hasClawHubSkills(skills []string) bool {
 	for _, s := range skills {
 		if !strings.HasPrefix(s, "npm:") {
+			return true
+		}
+	}
+	return false
+}
+
+// hasNpmSkills returns true if any entry is an npm-prefixed skill.
+func hasNpmSkills(skills []string) bool {
+	for _, s := range skills {
+		if strings.HasPrefix(s, "npm:") {
 			return true
 		}
 	}
@@ -819,6 +832,11 @@ func buildSkillsInitContainer(instance *openclawv1alpha1.OpenClawInstance) *core
 	env := []corev1.EnvVar{
 		{Name: "HOME", Value: "/tmp"},
 		{Name: "NPM_CONFIG_CACHE", Value: "/tmp/.npm"},
+		// Redirect npm global installs to the PVC so binaries land in
+		// ~/.openclaw/.local/bin (same physical dir as ~/.local/bin in the
+		// main container via subpath mount). This keeps npm skill binaries
+		// alongside uv, pnpm, and other tools (#335).
+		{Name: "NPM_CONFIG_PREFIX", Value: "/home/openclaw/.openclaw/.local"},
 		// Disable npm lifecycle scripts for all npm operations in this
 		// container tree (clawhub install + npm install). This mitigates
 		// supply chain attacks via malicious preinstall/postinstall scripts.
