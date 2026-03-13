@@ -1052,6 +1052,7 @@ func (r *OpenClawInstanceReconciler) reconcileStatefulSet(ctx context.Context, i
 			}
 		}
 		desired := resources.BuildStatefulSet(instance, gwSecretName, skillPacks)
+		resources.NormalizeStatefulSet(desired)
 		if !resources.VolumeClaimTemplatesEqual(sts.Spec.VolumeClaimTemplates, desired.Spec.VolumeClaimTemplates) {
 			log.FromContext(ctx).Info("VolumeClaimTemplates changed, recreating StatefulSet")
 			if err := r.Client.Delete(ctx, sts); err != nil {

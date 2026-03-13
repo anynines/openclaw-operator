@@ -21,6 +21,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 
@@ -2374,17 +2375,20 @@ func statefulSetReplicas(instance *openclawv1alpha1.OpenClawInstance) *int32 {
 	return Ptr(int32(1))
 }
 
-// VolumeClaimTemplatesEqual compares two VolumeClaimTemplate slices by name.
-// VolumeClaimTemplates are immutable on existing StatefulSets, so we only need
-// to detect whether the set of template names changed (added, removed, or
-// reordered). Spec changes within a template are also immutable and would be
-// rejected by the API server, so a name-based comparison is sufficient.
+// VolumeClaimTemplatesEqual compares two VolumeClaimTemplate slices by name
+// and spec. Both name and spec are immutable on existing StatefulSets, so any
+// change requires a delete+recreate. The caller must normalize the desired VCTs
+// (e.g. via NormalizeStatefulSet) before comparing so that API server defaults
+// like VolumeMode don't cause false negatives.
 func VolumeClaimTemplatesEqual(a, b []corev1.PersistentVolumeClaim) bool {
 	if len(a) != len(b) {
 		return false
 	}
 	for i := range a {
 		if a[i].Name != b[i].Name {
+			return false
+		}
+		if !reflect.DeepEqual(a[i].Spec, b[i].Spec) {
 			return false
 		}
 	}
