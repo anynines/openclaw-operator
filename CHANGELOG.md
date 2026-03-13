@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.2](https://github.com/openclaw-rocks/k8s-operator/compare/v0.16.1...v0.16.2) (2026-03-13)
+
+
+### Bug Fixes
+
+* add npm skill bin path to container PATH ([9237c68](https://github.com/openclaw-rocks/k8s-operator/commit/9237c6846c31cce485b7f38762b4e778580cf99c))
+* add npm skill binaries to PATH via global install ([#335](https://github.com/openclaw-rocks/k8s-operator/issues/335)) ([926e034](https://github.com/openclaw-rocks/k8s-operator/commit/926e034edcc43cb729f21fc83df8747c1d8f89b7))
+* update e2e test to expect npm install -g ([02944f0](https://github.com/openclaw-rocks/k8s-operator/commit/02944f0a66edb1a33a0feec426b365ef1de81823))
+
 ## [0.16.1](https://github.com/openclaw-rocks/k8s-operator/compare/v0.16.0...v0.16.1) (2026-03-13)
 
 
