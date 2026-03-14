@@ -461,17 +461,25 @@ var _ = Describe("S3 Helpers", func() {
 			Expect(term.LabelSelector.MatchLabels).To(HaveKeyWithValue("app.kubernetes.io/instance", "myinst"))
 		})
 
-		It("Should use shell command with timestamped S3 path under periodic/ prefix", func() {
+		It("Should use incremental sync with daily snapshots and retention cleanup", func() {
 			cronJob := buildBackupCronJob(instance, creds, "myinst-s3-credentials")
 			container := cronJob.Spec.JobTemplate.Spec.Template.Spec.Containers[0]
 			Expect(container.Command).To(HaveLen(3))
 			Expect(container.Command[0]).To(Equal("sh"))
 			Expect(container.Command[1]).To(Equal("-c"))
-			// Verify the shell script references periodic/ path with timestamp
-			Expect(container.Command[2]).To(ContainSubstring("periodic/${TIMESTAMP}"))
-			Expect(container.Command[2]).To(ContainSubstring("TIMESTAMP=$(date -u"))
-			Expect(container.Command[2]).To(ContainSubstring("rclone sync /data/"))
-			Expect(container.Command[2]).To(ContainSubstring(":s3:test-bucket/backups/cus_123/myinst/periodic/"))
+			cmd := container.Command[2]
+			// Step 1: incremental sync to fixed "latest" path
+			Expect(cmd).To(ContainSubstring("rclone sync /data/"))
+			Expect(cmd).To(ContainSubstring("/latest"))
+			Expect(cmd).To(ContainSubstring(":s3:test-bucket/backups/cus_123/myinst/periodic"))
+			// Step 2: daily snapshot
+			Expect(cmd).To(ContainSubstring("rclone copy"))
+			Expect(cmd).To(ContainSubstring("/snapshots/${TODAY}"))
+			// Step 3: retention cleanup
+			Expect(cmd).To(ContainSubstring("rclone purge"))
+			Expect(cmd).To(ContainSubstring("CUTOFF"))
+			// Should NOT use the old timestamped full-copy approach
+			Expect(cmd).NotTo(ContainSubstring("periodic/${TIMESTAMP}"))
 		})
 
 		It("Should set security context with UID/GID 1000", func() {
