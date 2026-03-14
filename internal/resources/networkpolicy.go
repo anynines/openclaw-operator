@@ -72,6 +72,12 @@ func networkPolicyIngressPorts(instance *openclawv1alpha1.OpenClawInstance) []ne
 				Port:     Ptr(intstr.FromInt32(port)),
 			})
 		}
+		if IsMetricsEnabled(instance) {
+			ports = append(ports, networkingv1.NetworkPolicyPort{
+				Protocol: Ptr(corev1.ProtocolTCP),
+				Port:     Ptr(intstr.FromInt32(MetricsPort(instance))),
+			})
+		}
 		return ports
 	}
 
@@ -102,6 +108,13 @@ func networkPolicyIngressPorts(instance *openclawv1alpha1.OpenClawInstance) []ne
 				Protocol: Ptr(corev1.ProtocolTCP),
 				Port:     Ptr(intstr.FromInt32(int32(ChromiumProxyPort))),
 			})
+	}
+
+	if IsMetricsEnabled(instance) {
+		ports = append(ports, networkingv1.NetworkPolicyPort{
+			Protocol: Ptr(corev1.ProtocolTCP),
+			Port:     Ptr(intstr.FromInt32(MetricsPort(instance))),
+		})
 	}
 
 	return ports

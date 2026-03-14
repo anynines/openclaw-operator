@@ -1594,12 +1594,13 @@ func TestBuildNetworkPolicy_Default(t *testing.T) {
 		t.Errorf("ingress namespace selector = %v, want test-ns", nsSel.MatchLabels)
 	}
 
-	// Ingress ports - gateway proxy and canvas proxy
-	if len(firstIngress.Ports) != 2 {
-		t.Fatalf("expected 2 ingress ports, got %d", len(firstIngress.Ports))
+	// Ingress ports - gateway proxy, canvas proxy, and metrics (enabled by default)
+	if len(firstIngress.Ports) != 3 {
+		t.Fatalf("expected 3 ingress ports, got %d", len(firstIngress.Ports))
 	}
 	assertNPPort(t, firstIngress.Ports, GatewayProxyPort)
 	assertNPPort(t, firstIngress.Ports, CanvasProxyPort)
+	assertNPPort(t, firstIngress.Ports, int(DefaultMetricsPort))
 
 	// Egress rules - DNS (UDP+TCP 53) and HTTPS (443)
 	if len(np.Spec.Egress) < 2 {
@@ -1649,13 +1650,14 @@ func TestBuildNetworkPolicy_CustomServicePorts(t *testing.T) {
 
 	np := BuildNetworkPolicy(instance)
 
-	// Same-namespace ingress rule should use custom ports
+	// Same-namespace ingress rule should use custom ports + metrics (enabled by default)
 	firstIngress := np.Spec.Ingress[0]
-	if len(firstIngress.Ports) != 2 {
-		t.Fatalf("expected 2 ingress ports for custom service ports, got %d", len(firstIngress.Ports))
+	if len(firstIngress.Ports) != 3 {
+		t.Fatalf("expected 3 ingress ports for custom service ports + metrics, got %d", len(firstIngress.Ports))
 	}
 	assertNPPort(t, firstIngress.Ports, 3978)
 	assertNPPort(t, firstIngress.Ports, 50051)
+	assertNPPort(t, firstIngress.Ports, int(DefaultMetricsPort))
 }
 
 func TestBuildNetworkPolicy_CustomServicePortsWithTargetPort(t *testing.T) {
@@ -1667,11 +1669,12 @@ func TestBuildNetworkPolicy_CustomServicePortsWithTargetPort(t *testing.T) {
 	np := BuildNetworkPolicy(instance)
 
 	firstIngress := np.Spec.Ingress[0]
-	if len(firstIngress.Ports) != 1 {
-		t.Fatalf("expected 1 ingress port, got %d", len(firstIngress.Ports))
+	if len(firstIngress.Ports) != 2 {
+		t.Fatalf("expected 2 ingress ports (custom + metrics), got %d", len(firstIngress.Ports))
 	}
 	// NetworkPolicy should use targetPort (container port), not service port
 	assertNPPort(t, firstIngress.Ports, 3978)
+	assertNPPort(t, firstIngress.Ports, int(DefaultMetricsPort))
 }
 
 func TestBuildNetworkPolicy_CustomPortsApplyToAllRules(t *testing.T) {
@@ -1689,10 +1692,11 @@ func TestBuildNetworkPolicy_CustomPortsApplyToAllRules(t *testing.T) {
 		t.Fatalf("expected 3 ingress rules, got %d", len(np.Spec.Ingress))
 	}
 	for i, rule := range np.Spec.Ingress {
-		if len(rule.Ports) != 1 {
-			t.Fatalf("rule %d: expected 1 port, got %d", i, len(rule.Ports))
+		if len(rule.Ports) != 2 {
+			t.Fatalf("rule %d: expected 2 ports (custom + metrics), got %d", i, len(rule.Ports))
 		}
 		assertNPPort(t, rule.Ports, 8080)
+		assertNPPort(t, rule.Ports, int(DefaultMetricsPort))
 	}
 }
 
@@ -9654,14 +9658,14 @@ func TestBuildNetworkPolicy_WebTerminalIngressPort(t *testing.T) {
 
 	np := BuildNetworkPolicy(instance)
 
-	// Default ingress rule should have 3 ports (gateway, canvas, web-terminal)
+	// Default ingress rule should have 4 ports (gateway, canvas, web-terminal, metrics)
 	if len(np.Spec.Ingress) == 0 {
 		t.Fatal("expected at least one ingress rule")
 	}
 
 	ports := np.Spec.Ingress[0].Ports
-	if len(ports) != 3 {
-		t.Fatalf("expected 3 ingress ports with web terminal, got %d", len(ports))
+	if len(ports) != 4 {
+		t.Fatalf("expected 4 ingress ports with web terminal, got %d", len(ports))
 	}
 
 	// Verify web-terminal port is present
@@ -9689,8 +9693,8 @@ func TestBuildNetworkPolicy_ChromiumIngressAndEgress(t *testing.T) {
 	}
 
 	ports := np.Spec.Ingress[0].Ports
-	if len(ports) != 4 {
-		t.Fatalf("expected 4 ingress ports with chromium (gateway, canvas, chromium, chromium-proxy), got %d", len(ports))
+	if len(ports) != 5 {
+		t.Fatalf("expected 5 ingress ports with chromium (gateway, canvas, chromium, chromium-proxy, metrics), got %d", len(ports))
 	}
 
 	foundChromiumIngress := false
@@ -9951,6 +9955,98 @@ func TestBuildNetworkPolicy_DefaultUsesProxyPorts(t *testing.T) {
 	}
 	if !foundCanvas {
 		t.Errorf("NetworkPolicy should allow port %d (canvas proxy)", CanvasProxyPort)
+	}
+}
+
+func TestBuildNetworkPolicy_MetricsPortIncludedByDefault(t *testing.T) {
+	instance := newTestInstance("np-metrics")
+	np := BuildNetworkPolicy(instance)
+
+	ports := np.Spec.Ingress[0].Ports
+	found := false
+	for _, p := range ports {
+		if p.Port != nil && p.Port.IntValue() == int(DefaultMetricsPort) {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("NetworkPolicy should allow metrics port %d when metrics are enabled (default)", DefaultMetricsPort)
+	}
+}
+
+func TestBuildNetworkPolicy_MetricsPortExcludedWhenDisabled(t *testing.T) {
+	instance := newTestInstance("np-no-metrics")
+	instance.Spec.Observability.Metrics.Enabled = Ptr(false)
+	np := BuildNetworkPolicy(instance)
+
+	ports := np.Spec.Ingress[0].Ports
+	for _, p := range ports {
+		if p.Port != nil && p.Port.IntValue() == int(DefaultMetricsPort) {
+			t.Errorf("NetworkPolicy should NOT allow metrics port %d when metrics are disabled", DefaultMetricsPort)
+		}
+	}
+}
+
+func TestBuildNetworkPolicy_CustomMetricsPort(t *testing.T) {
+	instance := newTestInstance("np-custom-metrics")
+	instance.Spec.Observability.Metrics.Port = Ptr(int32(8080))
+	np := BuildNetworkPolicy(instance)
+
+	ports := np.Spec.Ingress[0].Ports
+	found := false
+	for _, p := range ports {
+		if p.Port != nil && p.Port.IntValue() == 8080 {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("NetworkPolicy should allow custom metrics port 8080")
+	}
+}
+
+func TestBuildNetworkPolicy_MetricsPortWithCustomServicePorts(t *testing.T) {
+	instance := newTestInstance("np-custom-svc-metrics")
+	instance.Spec.Networking.Service.Ports = []openclawv1alpha1.ServicePortSpec{
+		{Name: "http", Port: 3978},
+	}
+	np := BuildNetworkPolicy(instance)
+
+	ports := np.Spec.Ingress[0].Ports
+	foundCustom := false
+	foundMetrics := false
+	for _, p := range ports {
+		if p.Port != nil {
+			switch p.Port.IntValue() {
+			case 3978:
+				foundCustom = true
+			case int(DefaultMetricsPort):
+				foundMetrics = true
+			}
+		}
+	}
+	if !foundCustom {
+		t.Error("NetworkPolicy should allow custom service port 3978")
+	}
+	if !foundMetrics {
+		t.Errorf("NetworkPolicy should allow metrics port %d even with custom service ports", DefaultMetricsPort)
+	}
+}
+
+func TestBuildNetworkPolicy_MetricsPortOnAllIngressRules(t *testing.T) {
+	instance := newTestInstance("np-metrics-all-rules")
+	instance.Spec.Security.NetworkPolicy.AllowedIngressNamespaces = []string{"monitoring"}
+	np := BuildNetworkPolicy(instance)
+
+	for i, rule := range np.Spec.Ingress {
+		found := false
+		for _, p := range rule.Ports {
+			if p.Port != nil && p.Port.IntValue() == int(DefaultMetricsPort) {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("ingress rule %d should include metrics port %d", i, DefaultMetricsPort)
+		}
 	}
 }
 
