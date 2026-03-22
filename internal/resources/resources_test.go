@@ -487,6 +487,12 @@ func TestBuildStatefulSet_WithChromium(t *testing.T) {
 		t.Errorf("chromium image = %q, want %q", chromium.Image, expectedImage)
 	}
 
+	// Command must be nil - Chrome runs via the image's run.sh entrypoint.
+	// Setting Command bypasses run.sh and breaks CDP on Chrome M136+ (#396).
+	if len(chromium.Command) != 0 {
+		t.Errorf("chromium Command should be nil (use image entrypoint), got %v", chromium.Command)
+	}
+
 	// Container args should include launch flags
 	if len(chromium.Args) == 0 {
 		t.Fatal("chromium container should have Args with Chrome launch flags")
@@ -11527,6 +11533,54 @@ func TestBuildStatefulSet_NoChromiumProxy(t *testing.T) {
 			t.Error("chromium-proxy should not exist - Chrome runs via run.sh")
 		}
 	}
+}
+
+// TestBuildStatefulSet_ChromiumNoCommandOverride ensures the chromium container
+// does NOT set a Command override, so the image's own entrypoint (run.sh) is
+// used. Bypassing run.sh breaks CDP on Chrome M136+ because Chrome silently
+// forces --remote-debugging-address to 127.0.0.1 and run.sh has a socat
+// workaround for this. See #396.
+func TestBuildStatefulSet_ChromiumNoCommandOverride(t *testing.T) {
+	instance := newTestInstance("no-cmd")
+	instance.Spec.Chromium.Enabled = true
+
+	sts := BuildStatefulSet(instance, "", nil)
+	for _, c := range sts.Spec.Template.Spec.InitContainers {
+		if c.Name == "chromium" {
+			if len(c.Command) != 0 {
+				t.Errorf("chromium Command should be nil (use image entrypoint), got %v", c.Command)
+			}
+			return
+		}
+	}
+	t.Fatal("chromium init container not found")
+}
+
+// TestBuildStatefulSet_ChromiumMigratesDeprecatedImage verifies that instances
+// created before v0.22.1 with the old ghcr.io/browserless/chromium kubebuilder
+// default get normalized to the current default image. Without this migration,
+// the old image either fails to pull (doesn't exist) or crashes because its
+// entrypoint is incompatible with Chrome launch flags passed as Args. See #396.
+func TestBuildStatefulSet_ChromiumMigratesDeprecatedImage(t *testing.T) {
+	instance := newTestInstance("migrate-img")
+	instance.Spec.Chromium.Enabled = true
+	instance.Spec.Chromium.Image.Repository = DeprecatedChromiumImage
+	instance.Spec.Chromium.Image.Tag = "latest" // old kubebuilder default tag
+
+	sts := BuildStatefulSet(instance, "", nil)
+	for _, c := range sts.Spec.Template.Spec.InitContainers {
+		if c.Name == "chromium" {
+			expectedImage := DefaultChromiumImage + ":" + DefaultChromiumTag
+			if c.Image != expectedImage {
+				t.Errorf("chromium image = %q, want %q (should migrate deprecated image)", c.Image, expectedImage)
+			}
+			if len(c.Command) != 0 {
+				t.Errorf("chromium Command should be nil after migration, got %v", c.Command)
+			}
+			return
+		}
+	}
+	t.Fatal("chromium init container not found")
 }
 
 func TestChromiumArgs_Deduplication(t *testing.T) {

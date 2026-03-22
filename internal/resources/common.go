@@ -63,6 +63,12 @@ const (
 	// is incompatible with Playwright's connectOverCDP -- see #360.
 	DefaultChromiumImage = "chromedp/headless-shell"
 
+	// DeprecatedChromiumImage is the old browserless image used before v0.22.1.
+	// Instances created with older CRDs have this value stored via kubebuilder
+	// defaults. The builder normalizes it to DefaultChromiumImage at reconcile
+	// time so upgrades work without manual spec edits.
+	DeprecatedChromiumImage = "ghcr.io/browserless/chromium"
+
 	// DefaultChromiumTag is the default tag for the Chromium sidecar image.
 	// "stable" tracks the latest Chrome stable channel release.
 	DefaultChromiumTag = "stable"

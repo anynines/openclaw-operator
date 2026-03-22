@@ -1512,7 +1512,12 @@ var _ = Describe("OpenClawInstance Controller", func() {
 			Expect(chromiumContainer.Ports).To(HaveLen(1))
 			Expect(chromiumContainer.Ports[0].ContainerPort).To(Equal(int32(resources.ChromiumPort)))
 
-			// Chrome runs via run.sh - Args should contain launch flags
+			// Command must be nil - Chrome runs via the image's run.sh entrypoint.
+			// Setting Command bypasses run.sh and breaks CDP on Chrome M136+ (#396).
+			Expect(chromiumContainer.Command).To(BeEmpty(),
+				"chromium Command must be nil so the image entrypoint (run.sh) is used")
+
+			// Args should contain launch flags passed to run.sh
 			Expect(chromiumContainer.Args).NotTo(BeEmpty(), "chromium should have Args with launch flags")
 			argsStr := strings.Join(chromiumContainer.Args, " ")
 			Expect(argsStr).To(ContainSubstring("--no-sandbox"))
