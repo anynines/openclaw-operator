@@ -1598,6 +1598,81 @@ var _ = Describe("OpenClawInstance Controller", func() {
 			Expect(k8sClient.Delete(ctx, instance)).Should(Succeed())
 		})
 
+		// Regression test for #396: instances created before v0.22.1 have the
+		// deprecated ghcr.io/browserless/chromium image stored via kubebuilder
+		// defaults. The operator must normalize it to chromedp/headless-shell
+		// and must NOT set a Command override (which bypasses run.sh and breaks
+		// CDP on Chrome M136+).
+		It("Should migrate deprecated browserless image to current default", func() {
+			if os.Getenv("E2E_SKIP_RESOURCE_VALIDATION") == "true" {
+				Skip("Skipping resource validation in minimal mode")
+			}
+
+			instanceName := "chromium-migrate-test"
+
+			instance := &openclawv1alpha1.OpenClawInstance{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      instanceName,
+					Namespace: namespace,
+					Annotations: map[string]string{
+						"openclaw.rocks/skip-backup": "true",
+					},
+				},
+				Spec: openclawv1alpha1.OpenClawInstanceSpec{
+					Image: openclawv1alpha1.ImageSpec{
+						Repository: "ghcr.io/openclaw/openclaw",
+						Tag:        "latest",
+					},
+					Chromium: openclawv1alpha1.ChromiumSpec{
+						Enabled: true,
+						Image: openclawv1alpha1.ChromiumImageSpec{
+							// Simulate a pre-v0.22.1 instance with old kubebuilder defaults
+							Repository: resources.DeprecatedChromiumImage,
+							Tag:        "latest",
+						},
+					},
+				},
+			}
+
+			Expect(k8sClient.Create(ctx, instance)).Should(Succeed())
+
+			statefulSet := &appsv1.StatefulSet{}
+			Eventually(func() error {
+				return k8sClient.Get(ctx, types.NamespacedName{
+					Name:      instanceName,
+					Namespace: namespace,
+				}, statefulSet)
+			}, timeout, interval).Should(Succeed())
+
+			// Find chromium init container
+			var chromiumContainer *corev1.Container
+			for i := range statefulSet.Spec.Template.Spec.InitContainers {
+				if statefulSet.Spec.Template.Spec.InitContainers[i].Name == "chromium" {
+					chromiumContainer = &statefulSet.Spec.Template.Spec.InitContainers[i]
+					break
+				}
+			}
+			Expect(chromiumContainer).NotTo(BeNil(), "chromium sidecar should exist")
+
+			// Image must be normalized to current default
+			expectedImage := resources.DefaultChromiumImage + ":" + resources.DefaultChromiumTag
+			Expect(chromiumContainer.Image).To(Equal(expectedImage),
+				"deprecated browserless image should be migrated to %s", expectedImage)
+
+			// Command must be nil so run.sh entrypoint is used (#396)
+			Expect(chromiumContainer.Command).To(BeEmpty(),
+				"chromium Command must be nil so the image entrypoint (run.sh) is used")
+
+			// Args should still contain launch flags
+			Expect(chromiumContainer.Args).NotTo(BeEmpty(),
+				"chromium should have Args with launch flags")
+			argsStr := strings.Join(chromiumContainer.Args, " ")
+			Expect(argsStr).To(ContainSubstring("--no-sandbox"))
+
+			// Clean up
+			Expect(k8sClient.Delete(ctx, instance)).Should(Succeed())
+		})
+
 		It("Should create persistent chromium volume when persistence is enabled", func() {
 			if os.Getenv("E2E_SKIP_RESOURCE_VALIDATION") == "true" {
 				Skip("Skipping resource validation in minimal mode")
