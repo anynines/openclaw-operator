@@ -434,6 +434,7 @@ var _ = Describe("Chromium Deprecated Image Migration", Ordered, func() {
 		localPort    int
 		portFwdCmd   *exec.Cmd
 		podName      string
+		cdpClient    = &http.Client{Timeout: 10 * time.Second}
 	)
 
 	BeforeAll(func() {
@@ -562,7 +563,7 @@ var _ = Describe("Chromium Deprecated Image Migration", Ordered, func() {
 			if portFwdCmd.ProcessState != nil {
 				return fmt.Errorf("port-forward process exited: %s", portFwdCmd.ProcessState)
 			}
-			resp, err := http.Get(fmt.Sprintf("http://localhost:%d/json/version", localPort))
+			resp, err := cdpClient.Get(fmt.Sprintf("http://localhost:%d/json/version", localPort))
 			if err != nil {
 				return err
 			}
@@ -588,7 +589,7 @@ var _ = Describe("Chromium Deprecated Image Migration", Ordered, func() {
 	})
 
 	It("CDP responds after migrating from deprecated browserless image", func() {
-		resp, err := http.Get(fmt.Sprintf("http://localhost:%d/json/version", localPort))
+		resp, err := cdpClient.Get(fmt.Sprintf("http://localhost:%d/json/version", localPort))
 		Expect(err).NotTo(HaveOccurred())
 		defer resp.Body.Close()
 
