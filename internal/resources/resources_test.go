@@ -11697,7 +11697,7 @@ func TestBuildStatefulSet_ChromiumNoCommandOverride(t *testing.T) {
 	instance := newTestInstance("no-cmd")
 	instance.Spec.Chromium.Enabled = true
 
-	sts := BuildStatefulSet(instance, "", nil)
+	sts := BuildStatefulSet(instance, "", nil, nil, nil)
 	for _, c := range sts.Spec.Template.Spec.InitContainers {
 		if c.Name == "chromium" {
 			if len(c.Command) != 0 {
@@ -11720,7 +11720,7 @@ func TestBuildStatefulSet_ChromiumMigratesDeprecatedImage(t *testing.T) {
 	instance.Spec.Chromium.Image.Repository = DeprecatedChromiumImage
 	instance.Spec.Chromium.Image.Tag = "latest" // old kubebuilder default tag
 
-	sts := BuildStatefulSet(instance, "", nil)
+	sts := BuildStatefulSet(instance, "", nil, nil, nil)
 	for _, c := range sts.Spec.Template.Spec.InitContainers {
 		if c.Name == "chromium" {
 			expectedImage := DefaultChromiumImage + ":" + DefaultChromiumTag
