@@ -1031,7 +1031,6 @@ var _ = Describe("Chromium Full Integration Tests", Ordered, func() {
 						}
 					}
 
-
 				case msg.Type == "res" && msg.ID == sendID:
 					if msg.OK != nil && *msg.OK {
 						chatSendOK = true

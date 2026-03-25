@@ -11802,22 +11802,23 @@ func TestBuildStatefulSet_ChromiumEntrypointCommand(t *testing.T) {
 
 	sts := BuildStatefulSet(instance, "", nil, nil, nil)
 	for _, c := range sts.Spec.Template.Spec.InitContainers {
-		if c.Name == "chromium" {
-			if len(c.Command) != len(ChromiumEntrypointCommand) {
-				t.Fatalf("chromium Command length = %d, want %d", len(c.Command), len(ChromiumEntrypointCommand))
-			}
-			for i, arg := range c.Command {
-				if arg != ChromiumEntrypointCommand[i] {
-					t.Errorf("chromium Command[%d] = %q, want %q", i, arg, ChromiumEntrypointCommand[i])
-				}
-			}
-			// Verify the script uses quoted "$@"
-			script := c.Command[2]
-			if !strings.Contains(script, `"$@"`) {
-				t.Error("entrypoint script must use quoted \"$@\" to prevent word-splitting")
-			}
-			return
+		if c.Name != "chromium" {
+			continue
 		}
+		if len(c.Command) != len(ChromiumEntrypointCommand) {
+			t.Fatalf("chromium Command length = %d, want %d", len(c.Command), len(ChromiumEntrypointCommand))
+		}
+		for i, arg := range c.Command {
+			if arg != ChromiumEntrypointCommand[i] {
+				t.Errorf("chromium Command[%d] = %q, want %q", i, arg, ChromiumEntrypointCommand[i])
+			}
+		}
+		// Verify the script uses quoted "$@"
+		script := c.Command[2]
+		if !strings.Contains(script, `"$@"`) {
+			t.Error("entrypoint script must use quoted \"$@\" to prevent word-splitting")
+		}
+		return
 	}
 	t.Fatal("chromium init container not found")
 }
