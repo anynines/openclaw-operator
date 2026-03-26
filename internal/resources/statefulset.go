@@ -982,6 +982,9 @@ func buildSkillsInitContainer(instance *openclawv1alpha1.OpenClawInstance) *core
 			Capabilities: &corev1.Capabilities{
 				Drop: []corev1.Capability{"ALL"},
 			},
+			SeccompProfile: &corev1.SeccompProfile{
+				Type: corev1.SeccompProfileTypeRuntimeDefault,
+			},
 		},
 		VolumeMounts: mounts,
 	}
@@ -1080,6 +1083,9 @@ func buildPluginsInitContainer(instance *openclawv1alpha1.OpenClawInstance) *cor
 			RunAsNonRoot:             Ptr(podRunAsNonRoot(instance)),
 			Capabilities: &corev1.Capabilities{
 				Drop: []corev1.Capability{"ALL"},
+			},
+			SeccompProfile: &corev1.SeccompProfile{
+				Type: corev1.SeccompProfileTypeRuntimeDefault,
 			},
 		},
 		VolumeMounts: mounts,
@@ -1545,7 +1551,12 @@ func buildChromiumContainer(instance *openclawv1alpha1.OpenClawInstance) corev1.
 		},
 	}
 
-	var chromiumEnv []corev1.EnvVar
+	// Set HOME to /tmp (an emptyDir) so fontconfig and other tools that
+	// need a writable home directory work correctly. The default nobody
+	// user (65534) has home /nonexistent which does not exist.
+	chromiumEnv := []corev1.EnvVar{
+		{Name: "HOME", Value: "/tmp"},
+	}
 
 	// Add CA bundle mount if configured. The certificate file is mounted
 	// into the system CA directory so Chrome picks it up automatically.
@@ -1823,6 +1834,7 @@ func buildOTelCollectorContainer(instance *openclawv1alpha1.OpenClawInstance) co
 			AllowPrivilegeEscalation: Ptr(false),
 			ReadOnlyRootFilesystem:   Ptr(true),
 			RunAsNonRoot:             Ptr(true),
+			RunAsUser:                Ptr(int64(65532)),
 			Capabilities: &corev1.Capabilities{
 				Drop: []corev1.Capability{"ALL"},
 			},

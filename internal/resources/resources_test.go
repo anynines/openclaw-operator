@@ -472,6 +472,8 @@ func TestBuildStatefulSet_WithChromium(t *testing.T) {
 	}
 
 	// Chrome runs directly - no PORT/HOST env vars (those were browserless-specific)
+	// HOME=/tmp is set so fontconfig and other tools find a writable home directory.
+	foundHome := false
 	for _, env := range chromium.Env {
 		if env.Name == "PORT" {
 			t.Error("chromium container should not have PORT env var (no longer using browserless)")
@@ -479,6 +481,12 @@ func TestBuildStatefulSet_WithChromium(t *testing.T) {
 		if env.Name == "HOST" {
 			t.Error("chromium container should not have HOST env var (no longer using browserless)")
 		}
+		if env.Name == "HOME" && env.Value == "/tmp" {
+			foundHome = true
+		}
+	}
+	if !foundHome {
+		t.Error("chromium container should have HOME=/tmp env var")
 	}
 
 	// Chromium image defaults
@@ -498,7 +506,7 @@ func TestBuildStatefulSet_WithChromium(t *testing.T) {
 		t.Fatal("chromium container should have Args with Chrome launch flags")
 	}
 	argsStr := strings.Join(chromium.Args, " ")
-	for _, required := range []string{"--no-sandbox", "--disable-gpu", "--no-first-run"} {
+	for _, required := range []string{"--no-sandbox", "--disable-gpu", "--no-first-run", "--disable-oom-score-adj"} {
 		if !strings.Contains(argsStr, required) {
 			t.Errorf("chromium Args missing %q", required)
 		}
@@ -2441,6 +2449,9 @@ func TestBuildStatefulSet_OTelCollectorContainer(t *testing.T) {
 		}
 		if !*c.SecurityContext.RunAsNonRoot {
 			t.Error("otel-collector should run as non-root")
+		}
+		if c.SecurityContext.RunAsUser == nil || *c.SecurityContext.RunAsUser != 65532 {
+			t.Error("otel-collector should have explicit runAsUser 65532")
 		}
 	}
 	if !found {
@@ -5489,6 +5500,9 @@ func TestBuildStatefulSet_WithSkills_InitSkillsContainer(t *testing.T) {
 	if sc.RunAsNonRoot == nil || !*sc.RunAsNonRoot {
 		t.Error("init-skills: runAsNonRoot should be true")
 	}
+	if sc.SeccompProfile == nil || sc.SeccompProfile.Type != corev1.SeccompProfileTypeRuntimeDefault {
+		t.Error("init-skills: seccomp profile should be RuntimeDefault")
+	}
 
 	// NPM_CONFIG_IGNORE_SCRIPTS must be set to mitigate supply chain attacks (#91)
 	if envMap["NPM_CONFIG_IGNORE_SCRIPTS"] != "true" {
@@ -5946,6 +5960,9 @@ func TestBuildStatefulSet_WithPlugins_InitPluginsContainer(t *testing.T) {
 	}
 	if sc.ReadOnlyRootFilesystem == nil || *sc.ReadOnlyRootFilesystem {
 		t.Error("init-plugins: readOnlyRootFilesystem should be false (npm needs writable node_modules)")
+	}
+	if sc.SeccompProfile == nil || sc.SeccompProfile.Type != corev1.SeccompProfileTypeRuntimeDefault {
+		t.Error("init-plugins: seccomp profile should be RuntimeDefault")
 	}
 
 	// NPM_CONFIG_IGNORE_SCRIPTS must be set
