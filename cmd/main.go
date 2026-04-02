@@ -19,6 +19,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"net/http"
@@ -48,6 +49,7 @@ import (
 
 	openclawv1alpha1 "github.com/openclawrocks/openclaw-operator/api/v1alpha1"
 	"github.com/openclawrocks/openclaw-operator/internal/controller"
+	"github.com/openclawrocks/openclaw-operator/internal/plans"
 	"github.com/openclawrocks/openclaw-operator/internal/registry"
 	"github.com/openclawrocks/openclaw-operator/internal/skillpacks"
 )
@@ -148,6 +150,10 @@ func main() {
 	versionResolver := registry.NewResolver(5 * time.Minute)
 	skillPackResolver := skillpacks.NewResolver(5*time.Minute, os.Getenv("GITHUB_TOKEN"))
 
+	// Load service plan registry from SERVICE_PLANS_JSON env var (set by Helm values).
+	// If not set, the registry is empty (no plans available, all instances use full control mode).
+	planRegistry := loadPlanRegistry()
+
 	if err = (&controller.OpenClawInstanceReconciler{
 		Client:            mgr.GetClient(),
 		Scheme:            mgr.GetScheme(),
@@ -155,6 +161,7 @@ func main() {
 		OperatorNamespace: operatorNamespace,
 		VersionResolver:   versionResolver,
 		SkillPackResolver: skillPackResolver,
+		PlanRegistry:      planRegistry,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "OpenClawInstance")
 		os.Exit(1)
@@ -280,4 +287,29 @@ func setupOTLPMetrics(endpoint string, insecure bool) (func(context.Context) err
 	)
 
 	return provider.Shutdown, nil
+}
+
+// loadPlanRegistry creates a plan registry from the SERVICE_PLANS_JSON env var.
+// The env var should contain a JSON object mapping plan names to ServicePlan definitions.
+// If the env var is not set or empty, returns an empty registry (no plans mode).
+//
+// Example SERVICE_PLANS_JSON:
+//
+//	{"dev-small":{"displayName":"Dev Small","resources":{"requests":{"cpu":"500m","memory":"1Gi"}}}}
+func loadPlanRegistry() *plans.Registry {
+	data := os.Getenv("SERVICE_PLANS_JSON")
+	if data == "" {
+		setupLog.Info("No service plans configured (SERVICE_PLANS_JSON not set)")
+		return plans.NewRegistry()
+	}
+
+	var planMap map[string]plans.ServicePlan
+	if err := json.Unmarshal([]byte(data), &planMap); err != nil {
+		setupLog.Error(err, "Failed to parse SERVICE_PLANS_JSON, starting without plans")
+		return plans.NewRegistry()
+	}
+
+	r := plans.NewRegistryFromMap(planMap)
+	setupLog.Info("Service plans loaded", "count", r.Len(), "plans", r.List())
+	return r
 }
