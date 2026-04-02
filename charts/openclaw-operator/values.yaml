@@ -119,6 +119,31 @@ webhook:
 networkPolicy:
   enabled: true
 
+# Service Plans — predefined configuration presets for OpenClaw instances.
+# Plans are T-shirt sizes: well-tested configurations that app developers
+# select by name (spec.plan: "dev-small"). Platform operators customize
+# these values to match their environment.
+#
+# When empty, all instances use full control mode (no plans).
+#
+# Example:
+# servicePlans:
+#   dev-small:
+#     displayName: "Dev Small"
+#     description: "Small development instance (gateway-only)"
+#     resources:
+#       requests: { cpu: "500m", memory: "1Gi" }
+#       limits: { cpu: "1", memory: "2Gi" }
+#     storage: { size: "5Gi" }
+#     config:
+#       agents:
+#         defaults:
+#           model: "anthropic/claude-sonnet-4.6"
+#     overridable:
+#       - config
+#       - storage.size
+servicePlans: {}
+
 # CRD installation
 crds:
   install: true
