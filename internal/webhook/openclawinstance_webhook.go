@@ -32,6 +32,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	openclawv1alpha1 "github.com/openclawrocks/openclaw-operator/api/v1alpha1"
+	"github.com/openclawrocks/openclaw-operator/internal/plans"
 	"github.com/openclawrocks/openclaw-operator/internal/resources"
 )
 
@@ -73,16 +74,25 @@ var knownConfigKeys = map[string]bool{
 }
 
 // OpenClawInstanceValidator validates OpenClawInstance resources
-type OpenClawInstanceValidator struct{}
+type OpenClawInstanceValidator struct {
+	// PlanRegistry holds the operator's service plan definitions.
+	// When nil, plan validation is skipped (backwards compatible).
+	PlanRegistry *plans.Registry
+}
 
 var _ webhook.CustomValidator = &OpenClawInstanceValidator{}
 
 // SetupWebhookWithManager sets up the webhook with the manager
 func SetupWebhookWithManager(mgr ctrl.Manager) error {
+	return SetupWebhookWithManagerAndPlans(mgr, nil)
+}
+
+// SetupWebhookWithManagerAndPlans sets up the webhook with the manager and a plan registry.
+func SetupWebhookWithManagerAndPlans(mgr ctrl.Manager, planRegistry *plans.Registry) error {
 	return ctrl.NewWebhookManagedBy(mgr).
 		For(&openclawv1alpha1.OpenClawInstance{}).
 		WithDefaulter(&OpenClawInstanceDefaulter{}).
-		WithValidator(&OpenClawInstanceValidator{}).
+		WithValidator(&OpenClawInstanceValidator{PlanRegistry: planRegistry}).
 		Complete()
 }
 
@@ -115,6 +125,14 @@ func (v *OpenClawInstanceValidator) ValidateDelete(ctx context.Context, obj runt
 // validate performs the actual validation logic
 func (v *OpenClawInstanceValidator) validate(instance *openclawv1alpha1.OpenClawInstance) (admission.Warnings, error) {
 	var warnings admission.Warnings
+
+	// 0. Validate service plan (if specified)
+	if instance.Spec.Plan != "" && v.PlanRegistry != nil {
+		if !v.PlanRegistry.Has(instance.Spec.Plan) {
+			return nil, fmt.Errorf("unknown service plan %q; available plans: %v",
+				instance.Spec.Plan, v.PlanRegistry.List())
+		}
+	}
 
 	// 1. Block running as root (UID 0)
 	if instance.Spec.Security.PodSecurityContext != nil &&

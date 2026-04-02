@@ -9,6 +9,15 @@ import (
 
 // OpenClawInstanceSpec defines the desired state of OpenClawInstance
 type OpenClawInstanceSpec struct {
+	// Plan selects a named service plan from the operator's plan registry.
+	// A service plan is a predefined configuration preset (T-shirt size) that
+	// sets resource limits, storage, and default config values.
+	// When set, plan defaults are applied first, then instance-level overrides
+	// are merged on top (only for fields the plan marks as overridable).
+	// When empty, the instance spec is used directly (full control mode).
+	// +optional
+	Plan string `json:"plan,omitempty"`
+
 	// Registry is the global container image registry override.
 	// When set, this registry replaces the registry part of all container images
 	// used by the instance (main container, sidecars, init containers).
@@ -1385,6 +1394,11 @@ type OpenClawInstanceStatus struct {
 	// ObservedGeneration is the most recent generation observed by the controller
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+
+	// ActivePlan is the name of the service plan currently applied to this instance.
+	// Empty if no plan is used (full control mode).
+	// +optional
+	ActivePlan string `json:"activePlan,omitempty"`
 
 	// GatewayEndpoint is the endpoint for the OpenClaw gateway
 	// +optional

@@ -50,6 +50,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	openclawv1alpha1 "github.com/openclawrocks/openclaw-operator/api/v1alpha1"
+	"github.com/openclawrocks/openclaw-operator/internal/plans"
 	"github.com/openclawrocks/openclaw-operator/internal/registry"
 	"github.com/openclawrocks/openclaw-operator/internal/resources"
 	"github.com/openclawrocks/openclaw-operator/internal/skillpacks"
@@ -81,6 +82,7 @@ type OpenClawInstanceReconciler struct {
 	OperatorNamespace string
 	VersionResolver   *registry.Resolver
 	SkillPackResolver *skillpacks.Resolver
+	PlanRegistry      *plans.Registry
 }
 
 // +kubebuilder:rbac:groups=openclaw.rocks,resources=openclawinstances,verbs=get;list;watch;create;update;patch;delete
@@ -315,6 +317,22 @@ func updatePhaseMetric(name, namespace, currentPhase string) {
 // reconcileResources reconciles all managed resources
 func (r *OpenClawInstanceReconciler) reconcileResources(ctx context.Context, instance *openclawv1alpha1.OpenClawInstance) error {
 	logger := log.FromContext(ctx)
+
+	// 0. Resolve service plan (if specified)
+	if instance.Spec.Plan != "" && r.PlanRegistry != nil {
+		result, err := plans.Resolve(r.PlanRegistry, instance.Spec.Plan)
+		if err != nil {
+			r.Recorder.Eventf(instance, corev1.EventTypeWarning, "PlanResolutionFailed",
+				"Failed to resolve service plan %q: %v", instance.Spec.Plan, err)
+			return fmt.Errorf("failed to resolve service plan: %w", err)
+		}
+		if result.Found {
+			instance.Status.ActivePlan = result.PlanName
+			logger.V(1).Info("Service plan resolved", "plan", result.PlanName)
+		}
+	} else {
+		instance.Status.ActivePlan = ""
+	}
 
 	// 1. Reconcile RBAC (ServiceAccount, Role, RoleBinding)
 	if err := r.reconcileRBAC(ctx, instance); err != nil {
