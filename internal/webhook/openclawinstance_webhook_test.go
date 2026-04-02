@@ -26,6 +26,7 @@ import (
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 
 	openclawv1alpha1 "github.com/openclawrocks/openclaw-operator/api/v1alpha1"
+	"github.com/openclawrocks/openclaw-operator/internal/plans"
 )
 
 // ptr returns a pointer to the given value.
@@ -1794,5 +1795,87 @@ func TestValidateUpdate_SuspendedWithHPA(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "mutually exclusive") {
 		t.Errorf("error should mention mutual exclusivity, got: %s", err.Error())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Service Plan validation tests
+// ---------------------------------------------------------------------------
+
+func TestValidateCreate_UnknownPlan(t *testing.T) {
+	registry := plans.NewRegistryFromMap(map[string]plans.ServicePlan{
+		"dev-small": {
+			DisplayName: "Dev Small",
+			Resources: plans.PlanResources{
+				Requests: plans.PlanResourceList{CPU: "500m", Memory: "1Gi"},
+				Limits:   plans.PlanResourceList{CPU: "1", Memory: "2Gi"},
+			},
+			Storage: plans.PlanStorage{Size: "5Gi"},
+		},
+	})
+
+	v := &OpenClawInstanceValidator{PlanRegistry: registry}
+	instance := newTestInstance()
+	instance.Spec.Plan = "nonexistent"
+
+	_, err := v.ValidateCreate(context.Background(), instance)
+	if err == nil {
+		t.Fatal("expected error for unknown plan name, got nil")
+	}
+	if !strings.Contains(err.Error(), "unknown service plan") {
+		t.Errorf("error should contain 'unknown service plan', got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "nonexistent") {
+		t.Errorf("error should contain the plan name 'nonexistent', got: %v", err)
+	}
+}
+
+func TestValidateCreate_KnownPlan(t *testing.T) {
+	registry := plans.NewRegistryFromMap(map[string]plans.ServicePlan{
+		"dev-small": {
+			DisplayName: "Dev Small",
+			Resources: plans.PlanResources{
+				Requests: plans.PlanResourceList{CPU: "500m", Memory: "1Gi"},
+				Limits:   plans.PlanResourceList{CPU: "1", Memory: "2Gi"},
+			},
+			Storage: plans.PlanStorage{Size: "5Gi"},
+		},
+	})
+
+	v := &OpenClawInstanceValidator{PlanRegistry: registry}
+	instance := newTestInstance()
+	instance.Spec.Plan = "dev-small"
+
+	_, err := v.ValidateCreate(context.Background(), instance)
+	if err != nil {
+		t.Errorf("expected no error for known plan 'dev-small', got: %v", err)
+	}
+}
+
+func TestValidateCreate_NoPlanRegistrySkipsValidation(t *testing.T) {
+	// PlanRegistry is nil: plan validation must be skipped (backwards compatible).
+	v := &OpenClawInstanceValidator{PlanRegistry: nil}
+	instance := newTestInstance()
+	instance.Spec.Plan = "nonexistent"
+
+	_, err := v.ValidateCreate(context.Background(), instance)
+	if err != nil {
+		t.Errorf("expected no error when PlanRegistry is nil, got: %v", err)
+	}
+}
+
+func TestValidateCreate_EmptyPlanSkipsValidation(t *testing.T) {
+	// spec.plan is empty: no plan validation regardless of registry.
+	registry := plans.NewRegistryFromMap(map[string]plans.ServicePlan{
+		"dev-small": {DisplayName: "Dev Small"},
+	})
+
+	v := &OpenClawInstanceValidator{PlanRegistry: registry}
+	instance := newTestInstance()
+	instance.Spec.Plan = "" // no plan
+
+	_, err := v.ValidateCreate(context.Background(), instance)
+	if err != nil {
+		t.Errorf("expected no error when plan is empty, got: %v", err)
 	}
 }
