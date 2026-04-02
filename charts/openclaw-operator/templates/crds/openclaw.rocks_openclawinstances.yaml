@@ -1,16 +1,10 @@
-{{- if .Values.crds.install }}
 ---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.17.2
-    {{- if .Values.crds.keep }}
-    "helm.sh/resource-policy": keep
-    {{- end }}
   name: openclawinstances.openclaw.rocks
-  labels:
-    {{- include "openclaw-operator.labels" . | nindent 4 }}
 spec:
   group: openclaw.rocks
   names:
@@ -5477,6 +5471,15 @@ spec:
                         type: string
                     type: object
                 type: object
+              plan:
+                description: |-
+                  Plan selects a named service plan from the operator's plan registry.
+                  A service plan is a predefined configuration preset (T-shirt size) that
+                  sets resource limits, storage, and default config values.
+                  When set, plan defaults are applied first, then instance-level overrides
+                  are merged on top (only for fields the plan marks as overridable).
+                  When empty, the instance spec is used directly (full control mode).
+                type: string
               plugins:
                 description: |-
                   Plugins is a list of plugins to install via init container.
@@ -9562,6 +9565,11 @@ spec:
           status:
             description: OpenClawInstanceStatus defines the observed state of OpenClawInstance
             properties:
+              activePlan:
+                description: |-
+                  ActivePlan is the name of the service plan currently applied to this instance.
+                  Empty if no plan is used (full control mode).
+                type: string
               autoUpdate:
                 description: AutoUpdate tracks the state of automatic version updates
                 properties:
@@ -9809,4 +9817,3 @@ spec:
     storage: true
     subresources:
       status: {}
-{{- end }}
