@@ -21,6 +21,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -318,7 +319,7 @@ func updatePhaseMetric(name, namespace, currentPhase string) {
 func (r *OpenClawInstanceReconciler) reconcileResources(ctx context.Context, instance *openclawv1alpha1.OpenClawInstance) error {
 	logger := log.FromContext(ctx)
 
-	// 0. Resolve service plan (if specified)
+	// 0. Resolve service plan and apply effective spec
 	if instance.Spec.Plan != "" && r.PlanRegistry != nil {
 		result, err := plans.Resolve(r.PlanRegistry, instance.Spec.Plan)
 		if err != nil {
@@ -328,7 +329,12 @@ func (r *OpenClawInstanceReconciler) reconcileResources(ctx context.Context, ins
 		}
 		if result.Found {
 			instance.Status.ActivePlan = result.PlanName
-			logger.V(1).Info("Service plan resolved", "plan", result.PlanName)
+			if err := r.applyPlanDefaults(instance, &result.Plan); err != nil {
+				r.Recorder.Eventf(instance, corev1.EventTypeWarning, "PlanMergeFailed",
+					"Failed to merge plan defaults: %v", err)
+				return fmt.Errorf("failed to merge plan defaults: %w", err)
+			}
+			logger.V(1).Info("Service plan resolved and applied", "plan", result.PlanName)
 		}
 	} else {
 		instance.Status.ActivePlan = ""
@@ -1772,6 +1778,78 @@ func (r *OpenClawInstanceReconciler) computeSecretHash(ctx context.Context, inst
 		}
 	}
 	return hex.EncodeToString(h.Sum(nil)[:8]), missingSecrets, nil
+}
+
+// applyPlanDefaults merges plan defaults into the instance spec in-memory.
+// This modifies the instance object so that downstream builders (ConfigMap,
+// StatefulSet) automatically pick up plan values without needing to know
+// about plans. The merge follows the Effective Spec pattern:
+// Plan-Defaults ← Instance-Overrides = Effective Spec.
+//
+// Only empty/zero instance fields are filled from the plan. Existing instance
+// values are never overwritten (they are treated as overrides).
+func (r *OpenClawInstanceReconciler) applyPlanDefaults(instance *openclawv1alpha1.OpenClawInstance, plan *plans.ServicePlan) error {
+	// Merge resources: plan fills empty fields, instance overrides win
+	if plan.Resources.Requests.CPU != "" && instance.Spec.Resources.Requests.CPU == "" {
+		instance.Spec.Resources.Requests.CPU = plan.Resources.Requests.CPU
+	}
+	if plan.Resources.Requests.Memory != "" && instance.Spec.Resources.Requests.Memory == "" {
+		instance.Spec.Resources.Requests.Memory = plan.Resources.Requests.Memory
+	}
+	if plan.Resources.Limits.CPU != "" && instance.Spec.Resources.Limits.CPU == "" {
+		instance.Spec.Resources.Limits.CPU = plan.Resources.Limits.CPU
+	}
+	if plan.Resources.Limits.Memory != "" && instance.Spec.Resources.Limits.Memory == "" {
+		instance.Spec.Resources.Limits.Memory = plan.Resources.Limits.Memory
+	}
+
+	// Merge storage size
+	if plan.Storage.Size != "" && instance.Spec.Storage.Persistence.Size == "" {
+		instance.Spec.Storage.Persistence.Size = plan.Storage.Size
+	}
+
+	// Merge config: deep-merge plan config under instance config.raw
+	if len(plan.Config) > 0 {
+		if err := r.mergePlanConfig(instance, plan.Config); err != nil {
+			return fmt.Errorf("failed to merge plan config: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// mergePlanConfig deep-merges plan config values into instance.Spec.Config.Raw.
+// Instance values always win over plan values.
+func (r *OpenClawInstanceReconciler) mergePlanConfig(instance *openclawv1alpha1.OpenClawInstance, planConfig map[string]interface{}) error {
+	// Parse existing instance config
+	var instanceConfig map[string]interface{}
+	if instance.Spec.Config.Raw != nil && len(instance.Spec.Config.Raw.Raw) > 0 {
+		if err := json.Unmarshal(instance.Spec.Config.Raw.Raw, &instanceConfig); err != nil {
+			return fmt.Errorf("failed to parse instance config: %w", err)
+		}
+	}
+	if instanceConfig == nil {
+		instanceConfig = make(map[string]interface{})
+	}
+
+	// Deep merge: plan config is base, instance config overrides
+	merged := plans.Merge(plans.MergeInput{
+		Plan:           &plans.ServicePlan{Config: planConfig},
+		PlanName:       instance.Spec.Plan,
+		InstanceConfig: instanceConfig,
+	})
+
+	// Serialize back to JSON
+	mergedBytes, err := json.Marshal(merged.Config)
+	if err != nil {
+		return fmt.Errorf("failed to serialize merged config: %w", err)
+	}
+
+	// Update instance spec in-memory
+	instance.Spec.Config.Raw = &openclawv1alpha1.RawConfig{
+		RawExtension: runtime.RawExtension{Raw: mergedBytes},
+	}
+	return nil
 }
 
 // findInstancesForSecret maps a Secret change to reconcile requests for
