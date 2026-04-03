@@ -248,25 +248,10 @@ func (r *OpenClawInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		return ctrl.Result{RequeueAfter: RequeueAfter}, nil
 	}
 
-	// Determine phase based on condition health
-	skillPacksCondition := meta.FindStatusCondition(instance.Status.Conditions, openclawv1alpha1.ConditionTypeSkillPacksReady)
-	if skillPacksCondition != nil && skillPacksCondition.Status == metav1.ConditionFalse {
-		instance.Status.Phase = openclawv1alpha1.PhaseDegraded
-		meta.SetStatusCondition(&instance.Status.Conditions, metav1.Condition{
-			Type:    openclawv1alpha1.ConditionTypeReady,
-			Status:  metav1.ConditionTrue,
-			Reason:  "ReconcileSucceededDegraded",
-			Message: "Resources reconciled but skill packs unavailable - instance running without skill packs",
-		})
-	} else {
-		instance.Status.Phase = openclawv1alpha1.PhaseRunning
-		meta.SetStatusCondition(&instance.Status.Conditions, metav1.Condition{
-			Type:    openclawv1alpha1.ConditionTypeReady,
-			Status:  metav1.ConditionTrue,
-			Reason:  "ReconcileSucceeded",
-			Message: "All resources reconciled successfully",
-		})
-	}
+	// Determine Ready condition and Phase by aggregating individual conditions.
+	aggr := computeReadyCondition(instance)
+	meta.SetStatusCondition(&instance.Status.Conditions, aggr.Condition)
+	instance.Status.Phase = aggr.Phase
 	if instance.Status.ObservedGeneration != instance.Generation {
 		instance.Status.LastReconcileTime = &metav1.Time{Time: time.Now()}
 	}

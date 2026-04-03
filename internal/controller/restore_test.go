@@ -59,6 +59,8 @@ var _ = Describe("Restore from Backup", func() {
 			}, timeout, interval).Should(BeElementOf(
 				openclawv1alpha1.PhaseRunning,
 				openclawv1alpha1.PhaseProvisioning,
+				openclawv1alpha1.PhaseFailed, // envtest: StatefulSetReady never reaches True (no kubelet)
+				openclawv1alpha1.PhaseDegraded,
 			))
 
 			// Verify no restore Job was created
