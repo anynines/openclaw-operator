@@ -33,6 +33,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	openclawv1alpha1 "github.com/openclawrocks/openclaw-operator/api/v1alpha1"
+	"github.com/openclawrocks/openclaw-operator/internal/plans"
 )
 
 var (
@@ -77,11 +78,49 @@ var _ = BeforeSuite(func() {
 	})
 	Expect(err).NotTo(HaveOccurred())
 
+	testPlanRegistry := plans.NewRegistryFromMap(map[string]plans.ServicePlan{
+		"test-plan-small": {
+			DisplayName: "Small Test Plan",
+			Description: "Small plan for envtest",
+			Resources: plans.PlanResources{
+				Requests: plans.PlanResourceList{CPU: "200m", Memory: "256Mi"},
+				Limits:   plans.PlanResourceList{CPU: "500m", Memory: "512Mi"},
+			},
+			Storage: plans.PlanStorage{Size: "2Gi"},
+			Config: map[string]interface{}{
+				"agents": map[string]interface{}{
+					"defaults": map[string]interface{}{
+						"model": "test/small-model",
+					},
+				},
+			},
+			Overridable: []string{"config", "storage.size"},
+		},
+		"test-plan-locked": {
+			DisplayName: "Locked Test Plan",
+			Description: "Locked plan for envtest - nothing overridable",
+			Resources: plans.PlanResources{
+				Requests: plans.PlanResourceList{CPU: "1", Memory: "2Gi"},
+				Limits:   plans.PlanResourceList{CPU: "2", Memory: "4Gi"},
+			},
+			Storage: plans.PlanStorage{Size: "10Gi"},
+			Config: map[string]interface{}{
+				"agents": map[string]interface{}{
+					"defaults": map[string]interface{}{
+						"model": "test/locked-model",
+					},
+				},
+			},
+			Overridable: []string{},
+		},
+	})
+
 	err = (&OpenClawInstanceReconciler{
 		Client:            mgr.GetClient(),
 		Scheme:            mgr.GetScheme(),
 		Recorder:          mgr.GetEventRecorderFor("openclawinstance-controller"),
 		OperatorNamespace: "default",
+		PlanRegistry:      testPlanRegistry,
 	}).SetupWithManager(mgr)
 	Expect(err).NotTo(HaveOccurred())
 
