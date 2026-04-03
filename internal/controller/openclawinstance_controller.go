@@ -325,6 +325,12 @@ func (r *OpenClawInstanceReconciler) reconcileResources(ctx context.Context, ins
 		if err != nil {
 			r.Recorder.Eventf(instance, corev1.EventTypeWarning, "PlanResolutionFailed",
 				"Failed to resolve service plan %q: %v", instance.Spec.Plan, err)
+			meta.SetStatusCondition(&instance.Status.Conditions, metav1.Condition{
+				Type:    openclawv1alpha1.ConditionTypePlanResolved,
+				Status:  metav1.ConditionFalse,
+				Reason:  "PlanResolutionFailed",
+				Message: fmt.Sprintf("Failed to resolve service plan %q: %v", instance.Spec.Plan, err),
+			})
 			return fmt.Errorf("failed to resolve service plan: %w", err)
 		}
 		if result.Found {
@@ -332,8 +338,20 @@ func (r *OpenClawInstanceReconciler) reconcileResources(ctx context.Context, ins
 			if err := r.applyPlanDefaults(instance, &result.Plan); err != nil {
 				r.Recorder.Eventf(instance, corev1.EventTypeWarning, "PlanMergeFailed",
 					"Failed to merge plan defaults: %v", err)
+				meta.SetStatusCondition(&instance.Status.Conditions, metav1.Condition{
+					Type:    openclawv1alpha1.ConditionTypePlanResolved,
+					Status:  metav1.ConditionFalse,
+					Reason:  "PlanMergeFailed",
+					Message: fmt.Sprintf("Failed to merge plan defaults: %v", err),
+				})
 				return fmt.Errorf("failed to merge plan defaults: %w", err)
 			}
+			meta.SetStatusCondition(&instance.Status.Conditions, metav1.Condition{
+				Type:    openclawv1alpha1.ConditionTypePlanResolved,
+				Status:  metav1.ConditionTrue,
+				Reason:  "PlanApplied",
+				Message: fmt.Sprintf("Service plan %q resolved and applied", result.PlanName),
+			})
 			logger.V(1).Info("Service plan resolved and applied", "plan", result.PlanName)
 		}
 	} else {
@@ -402,6 +420,12 @@ func (r *OpenClawInstanceReconciler) reconcileResources(ctx context.Context, ins
 	// 3. Reconcile ConfigMap (always - enrichment pipeline runs on all config sources)
 	err = r.reconcileConfigMap(ctx, instance, gatewayToken, skillPacks)
 	if err != nil {
+		meta.SetStatusCondition(&instance.Status.Conditions, metav1.Condition{
+			Type:    openclawv1alpha1.ConditionTypeConfigReady,
+			Status:  metav1.ConditionFalse,
+			Reason:  "ConfigMapFailed",
+			Message: fmt.Sprintf("Failed to reconcile ConfigMap: %v", err),
+		})
 		return fmt.Errorf("failed to reconcile ConfigMap: %w", err)
 	}
 	logger.V(1).Info("ConfigMap reconciled")
@@ -414,9 +438,22 @@ func (r *OpenClawInstanceReconciler) reconcileResources(ctx context.Context, ins
 	// 3b. Reconcile Workspace ConfigMap (seed files for workspace)
 	wsFiles, err := r.reconcileWorkspaceConfigMap(ctx, instance, skillPacks)
 	if err != nil {
+		meta.SetStatusCondition(&instance.Status.Conditions, metav1.Condition{
+			Type:    openclawv1alpha1.ConditionTypeConfigReady,
+			Status:  metav1.ConditionFalse,
+			Reason:  "WorkspaceConfigMapFailed",
+			Message: fmt.Sprintf("Failed to reconcile Workspace ConfigMap: %v", err),
+		})
 		return fmt.Errorf("failed to reconcile Workspace ConfigMap: %w", err)
 	}
 	logger.V(1).Info("Workspace ConfigMap reconciled")
+
+	meta.SetStatusCondition(&instance.Status.Conditions, metav1.Condition{
+		Type:    openclawv1alpha1.ConditionTypeConfigReady,
+		Status:  metav1.ConditionTrue,
+		Reason:  "ConfigReady",
+		Message: "Gateway ConfigMap and Workspace ConfigMap reconciled successfully",
+	})
 
 	// 4. Reconcile PVC
 	if err := r.reconcilePVC(ctx, instance); err != nil {

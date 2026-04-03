@@ -1603,6 +1603,14 @@ const (
 	// ConditionTypeWorkspaceReady indicates the workspace configuration is valid
 	// and any external ConfigMap referenced by spec.workspace.configMapRef exists
 	ConditionTypeWorkspaceReady = "WorkspaceReady"
+
+	// ConditionTypeConfigReady indicates both the gateway ConfigMap and the
+	// workspace seed ConfigMap have been successfully reconciled.
+	ConditionTypeConfigReady = "ConfigReady"
+
+	// ConditionTypePlanResolved indicates the service plan referenced by
+	// spec.plan was found in the registry and its defaults have been applied.
+	ConditionTypePlanResolved = "PlanResolved"
 )
 
 // Phase constants
