@@ -15,8 +15,10 @@ import (
 )
 
 const (
-	healthCheckTimeout = 10 * time.Second
-	healthCheckPath    = "/api/health"
+	healthCheckTimeout     = 10 * time.Second
+	healthCheckPath        = "/api/health"
+	healthCheckGracePeriod = 60 * time.Second
+	defaultGatewayPort     = 18789
 )
 
 // healthCheckDoer abstracts HTTP GET for testing.
@@ -42,9 +44,24 @@ func (r *OpenClawInstanceReconciler) doHealthCheck(ctx context.Context, instance
 		return nil
 	}
 
+	// Grace period: skip health check if StatefulSet became ready less than
+	// 60s ago — the gateway needs time to start up.
+	if stsCond.LastTransitionTime.Time.After(time.Now().Add(-healthCheckGracePeriod)) {
+		logger.V(2).Info("Skipping health check: within grace period",
+			"readySince", stsCond.LastTransitionTime.Time,
+			"graceUntil", stsCond.LastTransitionTime.Time.Add(healthCheckGracePeriod))
+		return nil
+	}
+
+	// Determine gateway port: use resources.GatewayPort as default.
+	gatewayPort := defaultGatewayPort
+	if resources.GatewayPort > 0 {
+		gatewayPort = int(resources.GatewayPort)
+	}
+
 	url := fmt.Sprintf("http://%s.%s.svc:%d%s",
 		resources.ServiceName(instance), instance.Namespace,
-		resources.GatewayPort, healthCheckPath)
+		gatewayPort, healthCheckPath)
 
 	if doer == nil {
 		doer = &http.Client{Timeout: healthCheckTimeout}

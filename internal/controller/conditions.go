@@ -27,6 +27,15 @@ import (
 
 // requiredConditionTypes lists the condition types that must all be True for
 // the instance to be considered Ready. A single False here blocks Ready.
+//
+// Rationale for each:
+//   - RBACReady: Pod cannot start without ServiceAccount + Role bindings
+//   - NetworkPolicyReady: Required for security posture; missing = no network isolation
+//   - ConfigReady: Without ConfigMap the gateway starts with fallback config, not desired config
+//   - StorageReady: Without PVC, workspace data is lost on restart
+//   - StatefulSetReady: Core workload — no running Pod means no service
+//   - ServiceReady: Without Service the gateway is not reachable
+//   - HealthVerified: Gateway not responding = instance not usable (skipped during grace period)
 var requiredConditionTypes = []string{
 	openclawv1alpha1.ConditionTypeRBACReady,
 	openclawv1alpha1.ConditionTypeNetworkPolicyReady,
@@ -34,6 +43,7 @@ var requiredConditionTypes = []string{
 	openclawv1alpha1.ConditionTypeStorageReady,
 	openclawv1alpha1.ConditionTypeStatefulSetReady,
 	openclawv1alpha1.ConditionTypeServiceReady,
+	openclawv1alpha1.ConditionTypeHealthVerified,
 }
 
 // softConditionTypes lists condition types that are informational but do not
@@ -44,7 +54,6 @@ var softConditionTypes = []string{
 	openclawv1alpha1.ConditionTypeConfigValid,
 	openclawv1alpha1.ConditionTypeWorkspaceReady,
 	openclawv1alpha1.ConditionTypeSecretsReady,
-	openclawv1alpha1.ConditionTypeHealthVerified,
 }
 
 // ReadyAggregation is the result of computeReadyCondition.

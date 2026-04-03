@@ -52,6 +52,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -178,6 +179,14 @@ var _ = Describe("Plan Update Handling", func() {
 			}, timeout, interval).Should(Succeed())
 
 			By("Cleaning up")
+			// Remove finalizer before delete to avoid backup-job timeout in envtest
+			Eventually(func() error {
+				if err := k8sClient.Get(ctx, client.ObjectKeyFromObject(instance), instance); err != nil {
+					return err
+				}
+				instance.Finalizers = nil
+				return k8sClient.Update(ctx, instance)
+			}, timeout, interval).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, instance)).Should(Succeed())
 			Eventually(func() bool {
 				err := k8sClient.Get(ctx, instanceKey, &openclawv1alpha1.OpenClawInstance{})
@@ -235,6 +244,14 @@ var _ = Describe("Plan Update Handling", func() {
 			}, timeout, interval).Should(Succeed())
 
 			By("Cleaning up")
+			// Remove finalizer before delete to avoid backup-job timeout in envtest
+			Eventually(func() error {
+				if err := k8sClient.Get(ctx, client.ObjectKeyFromObject(instance), instance); err != nil {
+					return err
+				}
+				instance.Finalizers = nil
+				return k8sClient.Update(ctx, instance)
+			}, timeout, interval).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, instance)).Should(Succeed())
 			Eventually(func() bool {
 				err := k8sClient.Get(ctx, instanceKey, &openclawv1alpha1.OpenClawInstance{})
@@ -305,6 +322,14 @@ var _ = Describe("Plan Update Handling", func() {
 			}, timeout, interval).Should(Succeed())
 
 			By("Cleaning up")
+			// Remove finalizer before delete to avoid backup-job timeout in envtest
+			Eventually(func() error {
+				if err := k8sClient.Get(ctx, client.ObjectKeyFromObject(instance), instance); err != nil {
+					return err
+				}
+				instance.Finalizers = nil
+				return k8sClient.Update(ctx, instance)
+			}, timeout, interval).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, instance)).Should(Succeed())
 			Eventually(func() bool {
 				err := k8sClient.Get(ctx, instanceKey, &openclawv1alpha1.OpenClawInstance{})
@@ -368,6 +393,14 @@ var _ = Describe("Plan Update Handling", func() {
 				Should(Equal(resource.MustParse("1")))
 
 			By("Cleaning up")
+			// Remove finalizer before delete to avoid backup-job timeout in envtest
+			Eventually(func() error {
+				if err := k8sClient.Get(ctx, client.ObjectKeyFromObject(instance), instance); err != nil {
+					return err
+				}
+				instance.Finalizers = nil
+				return k8sClient.Update(ctx, instance)
+			}, timeout, interval).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, instance)).Should(Succeed())
 			Eventually(func() bool {
 				err := k8sClient.Get(ctx, instanceKey, &openclawv1alpha1.OpenClawInstance{})
