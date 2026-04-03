@@ -21,7 +21,6 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -304,43 +303,9 @@ func updatePhaseMetric(name, namespace, currentPhase string) {
 func (r *OpenClawInstanceReconciler) reconcileResources(ctx context.Context, instance *openclawv1alpha1.OpenClawInstance) error {
 	logger := log.FromContext(ctx)
 
-	// 0. Resolve service plan and apply effective spec
-	if instance.Spec.Plan != "" && r.PlanRegistry != nil {
-		result, err := plans.Resolve(r.PlanRegistry, instance.Spec.Plan)
-		if err != nil {
-			r.Recorder.Eventf(instance, corev1.EventTypeWarning, "PlanResolutionFailed",
-				"Failed to resolve service plan %q: %v", instance.Spec.Plan, err)
-			meta.SetStatusCondition(&instance.Status.Conditions, metav1.Condition{
-				Type:    openclawv1alpha1.ConditionTypePlanResolved,
-				Status:  metav1.ConditionFalse,
-				Reason:  "PlanResolutionFailed",
-				Message: fmt.Sprintf("Failed to resolve service plan %q: %v", instance.Spec.Plan, err),
-			})
-			return fmt.Errorf("failed to resolve service plan: %w", err)
-		}
-		if result.Found {
-			instance.Status.ActivePlan = result.PlanName
-			if err := r.applyPlanDefaults(instance, &result.Plan); err != nil {
-				r.Recorder.Eventf(instance, corev1.EventTypeWarning, "PlanMergeFailed",
-					"Failed to merge plan defaults: %v", err)
-				meta.SetStatusCondition(&instance.Status.Conditions, metav1.Condition{
-					Type:    openclawv1alpha1.ConditionTypePlanResolved,
-					Status:  metav1.ConditionFalse,
-					Reason:  "PlanMergeFailed",
-					Message: fmt.Sprintf("Failed to merge plan defaults: %v", err),
-				})
-				return fmt.Errorf("failed to merge plan defaults: %w", err)
-			}
-			meta.SetStatusCondition(&instance.Status.Conditions, metav1.Condition{
-				Type:    openclawv1alpha1.ConditionTypePlanResolved,
-				Status:  metav1.ConditionTrue,
-				Reason:  "PlanApplied",
-				Message: fmt.Sprintf("Service plan %q resolved and applied", result.PlanName),
-			})
-			logger.V(1).Info("Service plan resolved and applied", "plan", result.PlanName)
-		}
-	} else {
-		instance.Status.ActivePlan = ""
+	// --- anynines extension point: plan resolution ---
+	if err := r.reconcilePlanResolution(ctx, instance); err != nil {
+		return err
 	}
 
 	// 1. Reconcile RBAC (ServiceAccount, Role, RoleBinding)
@@ -405,12 +370,7 @@ func (r *OpenClawInstanceReconciler) reconcileResources(ctx context.Context, ins
 	// 3. Reconcile ConfigMap (always - enrichment pipeline runs on all config sources)
 	err = r.reconcileConfigMap(ctx, instance, gatewayToken, skillPacks)
 	if err != nil {
-		meta.SetStatusCondition(&instance.Status.Conditions, metav1.Condition{
-			Type:    openclawv1alpha1.ConditionTypeConfigReady,
-			Status:  metav1.ConditionFalse,
-			Reason:  "ConfigMapFailed",
-			Message: fmt.Sprintf("Failed to reconcile ConfigMap: %v", err),
-		})
+		setConfigReadyCondition(instance, err, "ConfigMapFailed") // --- anynines extension point ---
 		return fmt.Errorf("failed to reconcile ConfigMap: %w", err)
 	}
 	logger.V(1).Info("ConfigMap reconciled")
@@ -423,22 +383,11 @@ func (r *OpenClawInstanceReconciler) reconcileResources(ctx context.Context, ins
 	// 3b. Reconcile Workspace ConfigMap (seed files for workspace)
 	wsFiles, err := r.reconcileWorkspaceConfigMap(ctx, instance, skillPacks)
 	if err != nil {
-		meta.SetStatusCondition(&instance.Status.Conditions, metav1.Condition{
-			Type:    openclawv1alpha1.ConditionTypeConfigReady,
-			Status:  metav1.ConditionFalse,
-			Reason:  "WorkspaceConfigMapFailed",
-			Message: fmt.Sprintf("Failed to reconcile Workspace ConfigMap: %v", err),
-		})
+		setConfigReadyCondition(instance, err, "WorkspaceConfigMapFailed") // --- anynines extension point ---
 		return fmt.Errorf("failed to reconcile Workspace ConfigMap: %w", err)
 	}
 	logger.V(1).Info("Workspace ConfigMap reconciled")
-
-	meta.SetStatusCondition(&instance.Status.Conditions, metav1.Condition{
-		Type:    openclawv1alpha1.ConditionTypeConfigReady,
-		Status:  metav1.ConditionTrue,
-		Reason:  "ConfigReady",
-		Message: "Gateway ConfigMap and Workspace ConfigMap reconciled successfully",
-	})
+	setConfigReadyCondition(instance, nil, "") // --- anynines extension point ---
 
 	// 4. Reconcile PVC
 	if err := r.reconcilePVC(ctx, instance); err != nil {
@@ -525,7 +474,7 @@ func (r *OpenClawInstanceReconciler) reconcileResources(ctx context.Context, ins
 	}
 	logger.V(1).Info("Grafana dashboards reconciled")
 
-	// 12. Post-create/update health verification (non-blocking)
+	// --- anynines extension point: health verification (non-blocking) ---
 	if err := r.reconcileHealthCheck(ctx, instance); err != nil {
 		logger.Error(err, "Health check error (non-fatal)")
 	}
@@ -1807,77 +1756,8 @@ func (r *OpenClawInstanceReconciler) computeSecretHash(ctx context.Context, inst
 	return hex.EncodeToString(h.Sum(nil)[:8]), missingSecrets, nil
 }
 
-// applyPlanDefaults merges plan defaults into the instance spec in-memory.
-// This modifies the instance object so that downstream builders (ConfigMap,
-// StatefulSet) automatically pick up plan values without needing to know
-// about plans. The merge follows the Effective Spec pattern:
-// Plan-Defaults ← Instance-Overrides = Effective Spec.
-//
-// Only empty/zero instance fields are filled from the plan. Existing instance
-// values are never overwritten (they are treated as overrides).
-func (r *OpenClawInstanceReconciler) applyPlanDefaults(instance *openclawv1alpha1.OpenClawInstance, plan *plans.ServicePlan) error {
-	// Merge resources: plan fills empty fields, instance overrides win
-	if plan.Resources.Requests.CPU != "" && instance.Spec.Resources.Requests.CPU == "" {
-		instance.Spec.Resources.Requests.CPU = plan.Resources.Requests.CPU
-	}
-	if plan.Resources.Requests.Memory != "" && instance.Spec.Resources.Requests.Memory == "" {
-		instance.Spec.Resources.Requests.Memory = plan.Resources.Requests.Memory
-	}
-	if plan.Resources.Limits.CPU != "" && instance.Spec.Resources.Limits.CPU == "" {
-		instance.Spec.Resources.Limits.CPU = plan.Resources.Limits.CPU
-	}
-	if plan.Resources.Limits.Memory != "" && instance.Spec.Resources.Limits.Memory == "" {
-		instance.Spec.Resources.Limits.Memory = plan.Resources.Limits.Memory
-	}
-
-	// Merge storage size
-	if plan.Storage.Size != "" && instance.Spec.Storage.Persistence.Size == "" {
-		instance.Spec.Storage.Persistence.Size = plan.Storage.Size
-	}
-
-	// Merge config: deep-merge plan config under instance config.raw
-	if len(plan.Config) > 0 {
-		if err := r.mergePlanConfig(instance, plan.Config); err != nil {
-			return fmt.Errorf("failed to merge plan config: %w", err)
-		}
-	}
-
-	return nil
-}
-
-// mergePlanConfig deep-merges plan config values into instance.Spec.Config.Raw.
-// Instance values always win over plan values.
-func (r *OpenClawInstanceReconciler) mergePlanConfig(instance *openclawv1alpha1.OpenClawInstance, planConfig map[string]interface{}) error {
-	// Parse existing instance config
-	var instanceConfig map[string]interface{}
-	if instance.Spec.Config.Raw != nil && len(instance.Spec.Config.Raw.Raw) > 0 {
-		if err := json.Unmarshal(instance.Spec.Config.Raw.Raw, &instanceConfig); err != nil {
-			return fmt.Errorf("failed to parse instance config: %w", err)
-		}
-	}
-	if instanceConfig == nil {
-		instanceConfig = make(map[string]interface{})
-	}
-
-	// Deep merge: plan config is base, instance config overrides
-	merged := plans.Merge(plans.MergeInput{
-		Plan:           &plans.ServicePlan{Config: planConfig},
-		PlanName:       instance.Spec.Plan,
-		InstanceConfig: instanceConfig,
-	})
-
-	// Serialize back to JSON
-	mergedBytes, err := json.Marshal(merged.Config)
-	if err != nil {
-		return fmt.Errorf("failed to serialize merged config: %w", err)
-	}
-
-	// Update instance spec in-memory
-	instance.Spec.Config.Raw = &openclawv1alpha1.RawConfig{
-		RawExtension: runtime.RawExtension{Raw: mergedBytes},
-	}
-	return nil
-}
+// applyPlanDefaults and mergePlanConfig are defined in reconcile_extensions.go
+// to minimise modifications to this upstream file.
 
 // findInstancesForSecret maps a Secret change to reconcile requests for
 // OpenClawInstances that reference it via envFrom[].secretRef.

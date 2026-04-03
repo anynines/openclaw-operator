@@ -9,6 +9,7 @@ import (
 
 // OpenClawInstanceSpec defines the desired state of OpenClawInstance
 type OpenClawInstanceSpec struct {
+	// --- anynines extension (start) ---
 	// Plan selects a named service plan from the operator's plan registry.
 	// A service plan is a predefined configuration preset (T-shirt size) that
 	// sets resource limits, storage, and default config values.
@@ -17,6 +18,7 @@ type OpenClawInstanceSpec struct {
 	// When empty, the instance spec is used directly (full control mode).
 	// +optional
 	Plan string `json:"plan,omitempty"`
+	// --- anynines extension (end) ---
 
 	// Registry is the global container image registry override.
 	// When set, this registry replaces the registry part of all container images
@@ -1395,10 +1397,12 @@ type OpenClawInstanceStatus struct {
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
+	// --- anynines extension (start) ---
 	// ActivePlan is the name of the service plan currently applied to this instance.
 	// Empty if no plan is used (full control mode).
 	// +optional
 	ActivePlan string `json:"activePlan,omitempty"`
+	// --- anynines extension (end) ---
 
 	// GatewayEndpoint is the endpoint for the OpenClaw gateway
 	// +optional
@@ -1603,18 +1607,6 @@ const (
 	// ConditionTypeWorkspaceReady indicates the workspace configuration is valid
 	// and any external ConfigMap referenced by spec.workspace.configMapRef exists
 	ConditionTypeWorkspaceReady = "WorkspaceReady"
-
-	// ConditionTypeConfigReady indicates both the gateway ConfigMap and the
-	// workspace seed ConfigMap have been successfully reconciled.
-	ConditionTypeConfigReady = "ConfigReady"
-
-	// ConditionTypePlanResolved indicates the service plan referenced by
-	// spec.plan was found in the registry and its defaults have been applied.
-	ConditionTypePlanResolved = "PlanResolved"
-
-	// ConditionTypeHealthVerified indicates the OpenClaw gateway responded
-	// successfully to a post-create/update health check.
-	ConditionTypeHealthVerified = "HealthVerified"
 )
 
 // Phase constants

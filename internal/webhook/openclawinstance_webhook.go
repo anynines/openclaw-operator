@@ -126,12 +126,9 @@ func (v *OpenClawInstanceValidator) ValidateDelete(ctx context.Context, obj runt
 func (v *OpenClawInstanceValidator) validate(instance *openclawv1alpha1.OpenClawInstance) (admission.Warnings, error) {
 	var warnings admission.Warnings
 
-	// 0. Validate service plan (if specified)
-	if instance.Spec.Plan != "" && v.PlanRegistry != nil {
-		if !v.PlanRegistry.Has(instance.Spec.Plan) {
-			return nil, fmt.Errorf("unknown service plan %q; available plans: %v",
-				instance.Spec.Plan, v.PlanRegistry.List())
-		}
+	// --- anynines extension point: service plan validation ---
+	if err := validatePlanExtension(instance, v.PlanRegistry); err != nil {
+		return nil, err
 	}
 
 	// 1. Block running as root (UID 0)
