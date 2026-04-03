@@ -44,6 +44,7 @@ var softConditionTypes = []string{
 	openclawv1alpha1.ConditionTypeConfigValid,
 	openclawv1alpha1.ConditionTypeWorkspaceReady,
 	openclawv1alpha1.ConditionTypeSecretsReady,
+	openclawv1alpha1.ConditionTypeHealthVerified,
 }
 
 // ReadyAggregation is the result of computeReadyCondition.

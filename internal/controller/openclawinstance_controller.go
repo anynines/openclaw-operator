@@ -525,6 +525,11 @@ func (r *OpenClawInstanceReconciler) reconcileResources(ctx context.Context, ins
 	}
 	logger.V(1).Info("Grafana dashboards reconciled")
 
+	// 12. Post-create/update health verification (non-blocking)
+	if err := r.reconcileHealthCheck(ctx, instance); err != nil {
+		logger.Error(err, "Health check error (non-fatal)")
+	}
+
 	return nil
 }
 

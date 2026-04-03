@@ -1611,6 +1611,10 @@ const (
 	// ConditionTypePlanResolved indicates the service plan referenced by
 	// spec.plan was found in the registry and its defaults have been applied.
 	ConditionTypePlanResolved = "PlanResolved"
+
+	// ConditionTypeHealthVerified indicates the OpenClaw gateway responded
+	// successfully to a post-create/update health check.
+	ConditionTypeHealthVerified = "HealthVerified"
 )
 
 // Phase constants
