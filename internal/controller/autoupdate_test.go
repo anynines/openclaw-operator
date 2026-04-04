@@ -5,6 +5,7 @@ import (
 	"time"
 
 	openclawv1alpha1 "github.com/openclawrocks/openclaw-operator/api/v1alpha1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func Test_parseCheckInterval(t *testing.T) {
@@ -88,7 +89,7 @@ func Test_shouldCheckForUpdate(t *testing.T) {
 		{"interval elapsed", openclawv1alpha1.OpenClawInstance{
 			Status: openclawv1alpha1.OpenClawInstanceStatus{
 				AutoUpdate: openclawv1alpha1.AutoUpdateStatus{
-					LastCheckTime: &openclawv1alpha1.Metav1Time{Time: now.Add(-25 * time.Hour)},
+					LastCheckTime: &metav1.Time{Time: now.Add(-25 * time.Hour)},
 				},
 			},
 			Spec: openclawv1alpha1.OpenClawInstanceSpec{
@@ -98,7 +99,7 @@ func Test_shouldCheckForUpdate(t *testing.T) {
 		{"interval not elapsed", openclawv1alpha1.OpenClawInstance{
 			Status: openclawv1alpha1.OpenClawInstanceStatus{
 				AutoUpdate: openclawv1alpha1.AutoUpdateStatus{
-					LastCheckTime: &openclawv1alpha1.Metav1Time{Time: now.Add(-1 * time.Hour)},
+					LastCheckTime: &metav1.Time{Time: now.Add(-1 * time.Hour)},
 				},
 			},
 			Spec: openclawv1alpha1.OpenClawInstanceSpec{
