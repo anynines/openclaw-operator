@@ -694,6 +694,11 @@ func TestApplyEnvVarChanges(t *testing.T) {
 	}
 }
 
+// Helper function for string contains check
+func contains(s, substr string) bool {
+	return strings.Contains(s, substr)
+}
+
 func TestDeepMerge(t *testing.T) {
 	tests := []struct {
 		name     string
