@@ -669,7 +669,7 @@ func TestApplyEnvVarChanges(t *testing.T) {
 					t.Errorf("expected error containing %q, got nil", tt.errorMsg)
 					return
 				}
-				if tt.errorMsg != "" && !contains(err.Error(), tt.errorMsg) {
+				if tt.errorMsg != "" && !strings.Contains(err.Error(), tt.errorMsg) {
 					t.Errorf("expected error containing %q, got %q", tt.errorMsg, err.Error())
 				}
 				return
