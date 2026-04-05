@@ -27,389 +27,746 @@ import (
 	openclawv1alpha1 "github.com/openclawrocks/openclaw-operator/api/v1alpha1"
 )
 
-func newTestInstance() *openclawv1alpha1.OpenClawInstance {
-	return &openclawv1alpha1.OpenClawInstance{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "inst1",
-			Namespace: "test-ns",
+
+func TestDetermineActions(t *testing.T) {
+	tests := []struct {
+		name     string
+		sc       *openclawv1alpha1.OpenClawSelfConfig
+		expected []openclawv1alpha1.SelfConfigAction
+	}{
+		{
+			name: "no actions",
+			sc:   &openclawv1alpha1.OpenClawSelfConfig{},
+			expected: nil,
 		},
-		Spec: openclawv1alpha1.OpenClawInstanceSpec{},
-	}
-}
-
-func newTestSelfConfig() *openclawv1alpha1.OpenClawSelfConfig {
-	return &openclawv1alpha1.OpenClawSelfConfig{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "sc1",
-			Namespace: "test-ns",
+		{
+			name: "skills only - add",
+			sc: &openclawv1alpha1.OpenClawSelfConfig{
+				Spec: openclawv1alpha1.OpenClawSelfConfigSpec{
+					AddSkills: []string{"skill1"},
+				},
+			},
+			expected: []openclawv1alpha1.SelfConfigAction{openclawv1alpha1.SelfConfigActionSkills},
 		},
-		Spec: openclawv1alpha1.OpenClawSelfConfigSpec{
-			InstanceRef: "inst1",
+		{
+			name: "skills only - remove",
+			sc: &openclawv1alpha1.OpenClawSelfConfig{
+				Spec: openclawv1alpha1.OpenClawSelfConfigSpec{
+					RemoveSkills: []string{"skill1"},
+				},
+			},
+			expected: []openclawv1alpha1.SelfConfigAction{openclawv1alpha1.SelfConfigActionSkills},
 		},
-	}
-}
-
-func TestDetermineActions_Skills(t *testing.T) {
-	sc := newTestSelfConfig()
-	sc.Spec.AddSkills = []string{"@anthropic/mcp-server-fetch"}
-
-	actions := determineActions(sc)
-	if len(actions) != 1 || actions[0] != openclawv1alpha1.SelfConfigActionSkills {
-		t.Errorf("expected [skills], got %v", actions)
-	}
-}
-
-func TestDetermineActions_Multiple(t *testing.T) {
-	sc := newTestSelfConfig()
-	sc.Spec.AddSkills = []string{"skill1"}
-	sc.Spec.RemoveEnvVars = []string{"FOO"}
-
-	actions := determineActions(sc)
-	if len(actions) != 2 {
-		t.Fatalf("expected 2 actions, got %d", len(actions))
-	}
-}
-
-func TestDetermineActions_Empty(t *testing.T) {
-	sc := newTestSelfConfig()
-
-	actions := determineActions(sc)
-	if len(actions) != 0 {
-		t.Errorf("expected no actions, got %v", actions)
-	}
-}
-
-func TestCheckAllowedActions_AllAllowed(t *testing.T) {
-	requested := []openclawv1alpha1.SelfConfigAction{
-		openclawv1alpha1.SelfConfigActionSkills,
-		openclawv1alpha1.SelfConfigActionConfig,
-	}
-	allowed := []openclawv1alpha1.SelfConfigAction{
-		openclawv1alpha1.SelfConfigActionSkills,
-		openclawv1alpha1.SelfConfigActionConfig,
-		openclawv1alpha1.SelfConfigActionEnvVars,
-	}
-
-	denied := checkAllowedActions(requested, allowed)
-	if len(denied) != 0 {
-		t.Errorf("expected no denied, got %v", denied)
-	}
-}
-
-func TestCheckAllowedActions_SomeDenied(t *testing.T) {
-	requested := []openclawv1alpha1.SelfConfigAction{
-		openclawv1alpha1.SelfConfigActionSkills,
-		openclawv1alpha1.SelfConfigActionEnvVars,
-	}
-	allowed := []openclawv1alpha1.SelfConfigAction{
-		openclawv1alpha1.SelfConfigActionSkills,
-	}
-
-	denied := checkAllowedActions(requested, allowed)
-	if len(denied) != 1 || denied[0] != openclawv1alpha1.SelfConfigActionEnvVars {
-		t.Errorf("expected [envVars] denied, got %v", denied)
-	}
-}
-
-func TestCheckAllowedActions_EmptyAllowed(t *testing.T) {
-	requested := []openclawv1alpha1.SelfConfigAction{
-		openclawv1alpha1.SelfConfigActionSkills,
-	}
-	denied := checkAllowedActions(requested, nil)
-	if len(denied) != 1 {
-		t.Errorf("expected 1 denied, got %v", denied)
-	}
-}
-
-func TestApplySkillChanges_Add(t *testing.T) {
-	instance := newTestInstance()
-	instance.Spec.Skills = []string{"existing-skill"}
-
-	sc := newTestSelfConfig()
-	sc.Spec.AddSkills = []string{"new-skill"}
-
-	applySkillChanges(instance, sc)
-
-	if len(instance.Spec.Skills) != 2 {
-		t.Fatalf("expected 2 skills, got %d", len(instance.Spec.Skills))
-	}
-	if instance.Spec.Skills[1] != "new-skill" {
-		t.Errorf("expected new-skill, got %q", instance.Spec.Skills[1])
-	}
-}
-
-func TestApplySkillChanges_AddDeduplicate(t *testing.T) {
-	instance := newTestInstance()
-	instance.Spec.Skills = []string{"existing-skill"}
-
-	sc := newTestSelfConfig()
-	sc.Spec.AddSkills = []string{"existing-skill", "new-skill"}
-
-	applySkillChanges(instance, sc)
-
-	if len(instance.Spec.Skills) != 2 {
-		t.Fatalf("expected 2 skills (deduplicated), got %d", len(instance.Spec.Skills))
-	}
-}
-
-func TestApplySkillChanges_Remove(t *testing.T) {
-	instance := newTestInstance()
-	instance.Spec.Skills = []string{"skill-a", "skill-b", "skill-c"}
-
-	sc := newTestSelfConfig()
-	sc.Spec.RemoveSkills = []string{"skill-b"}
-
-	applySkillChanges(instance, sc)
-
-	if len(instance.Spec.Skills) != 2 {
-		t.Fatalf("expected 2 skills, got %d", len(instance.Spec.Skills))
-	}
-	for _, s := range instance.Spec.Skills {
-		if s == "skill-b" {
-			t.Error("skill-b should have been removed")
-		}
-	}
-}
-
-func TestApplyConfigPatch_Merge(t *testing.T) {
-	instance := newTestInstance()
-	instance.Spec.Config.Raw = &openclawv1alpha1.RawConfig{
-		RawExtension: runtime.RawExtension{Raw: []byte(`{"mcpServers":{"existing":{"command":"node"}},"key":"value"}`)},
-	}
-
-	sc := newTestSelfConfig()
-	sc.Spec.ConfigPatch = &openclawv1alpha1.RawConfig{
-		RawExtension: runtime.RawExtension{Raw: []byte(`{"mcpServers":{"new":{"command":"python"}},"newKey":"newValue"}`)},
-	}
-
-	if err := applyConfigPatch(instance, sc); err != nil {
-		t.Fatalf("applyConfigPatch failed: %v", err)
-	}
-
-	var result map[string]interface{}
-	if err := json.Unmarshal(instance.Spec.Config.Raw.Raw, &result); err != nil {
-		t.Fatalf("failed to parse result: %v", err)
-	}
-
-	// Existing key preserved
-	if result["key"] != "value" {
-		t.Error("existing key 'key' should be preserved")
-	}
-	// New key added
-	if result["newKey"] != "newValue" {
-		t.Error("new key 'newKey' should be added")
-	}
-	// Both MCP servers present
-	servers, ok := result["mcpServers"].(map[string]interface{})
-	if !ok {
-		t.Fatal("mcpServers should be a map")
-	}
-	if _, ok := servers["existing"]; !ok {
-		t.Error("existing MCP server should be preserved")
-	}
-	if _, ok := servers["new"]; !ok {
-		t.Error("new MCP server should be added")
-	}
-}
-
-func TestApplyConfigPatch_ProtectedKey(t *testing.T) {
-	instance := newTestInstance()
-	sc := newTestSelfConfig()
-	sc.Spec.ConfigPatch = &openclawv1alpha1.RawConfig{
-		RawExtension: runtime.RawExtension{Raw: []byte(`{"gateway":{"auth":{"token":"hacked"}}}`)},
-	}
-
-	err := applyConfigPatch(instance, sc)
-	if err == nil {
-		t.Error("expected error for protected config key 'gateway'")
-	}
-}
-
-func TestApplyConfigPatch_EmptyBase(t *testing.T) {
-	instance := newTestInstance()
-	// No existing config
-
-	sc := newTestSelfConfig()
-	sc.Spec.ConfigPatch = &openclawv1alpha1.RawConfig{
-		RawExtension: runtime.RawExtension{Raw: []byte(`{"key":"value"}`)},
-	}
-
-	if err := applyConfigPatch(instance, sc); err != nil {
-		t.Fatalf("applyConfigPatch failed: %v", err)
-	}
-
-	var result map[string]interface{}
-	if err := json.Unmarshal(instance.Spec.Config.Raw.Raw, &result); err != nil {
-		t.Fatalf("failed to parse result: %v", err)
-	}
-	if result["key"] != "value" {
-		t.Error("key should be set")
-	}
-}
-
-func TestApplyWorkspaceFileChanges_Add(t *testing.T) {
-	instance := newTestInstance()
-
-	sc := newTestSelfConfig()
-	sc.Spec.AddWorkspaceFiles = map[string]string{
-		"notes.md": "# Notes",
-	}
-
-	applyWorkspaceFileChanges(instance, sc)
-
-	if instance.Spec.Workspace == nil {
-		t.Fatal("workspace should be initialized")
-	}
-	if instance.Spec.Workspace.InitialFiles["notes.md"] != "# Notes" {
-		t.Error("notes.md should be added")
-	}
-}
-
-func TestApplyWorkspaceFileChanges_Remove(t *testing.T) {
-	instance := newTestInstance()
-	instance.Spec.Workspace = &openclawv1alpha1.WorkspaceSpec{
-		InitialFiles: map[string]string{
-			"keep.md":   "keep",
-			"remove.md": "remove",
+		{
+			name: "config only",
+			sc: &openclawv1alpha1.OpenClawSelfConfig{
+				Spec: openclawv1alpha1.OpenClawSelfConfigSpec{
+					ConfigPatch: &openclawv1alpha1.RawConfig{
+						RawExtension: runtime.RawExtension{Raw: []byte(`{"key":"value"}`)},
+					},
+				},
+			},
+			expected: []openclawv1alpha1.SelfConfigAction{openclawv1alpha1.SelfConfigActionConfig},
+		},
+		{
+			name: "workspace files only - add",
+			sc: &openclawv1alpha1.OpenClawSelfConfig{
+				Spec: openclawv1alpha1.OpenClawSelfConfigSpec{
+					AddWorkspaceFiles: map[string]string{"file1": "content1"},
+				},
+			},
+			expected: []openclawv1alpha1.SelfConfigAction{openclawv1alpha1.SelfConfigActionWorkspaceFiles},
+		},
+		{
+			name: "workspace files only - remove",
+			sc: &openclawv1alpha1.OpenClawSelfConfig{
+				Spec: openclawv1alpha1.OpenClawSelfConfigSpec{
+					RemoveWorkspaceFiles: []string{"file1"},
+				},
+			},
+			expected: []openclawv1alpha1.SelfConfigAction{openclawv1alpha1.SelfConfigActionWorkspaceFiles},
+		},
+		{
+			name: "env vars only - add",
+			sc: &openclawv1alpha1.OpenClawSelfConfig{
+				Spec: openclawv1alpha1.OpenClawSelfConfigSpec{
+					AddEnvVars: []openclawv1alpha1.SelfConfigEnvVar{{Name: "TEST", Value: "value"}},
+				},
+			},
+			expected: []openclawv1alpha1.SelfConfigAction{openclawv1alpha1.SelfConfigActionEnvVars},
+		},
+		{
+			name: "env vars only - remove",
+			sc: &openclawv1alpha1.OpenClawSelfConfig{
+				Spec: openclawv1alpha1.OpenClawSelfConfigSpec{
+					RemoveEnvVars: []string{"TEST"},
+				},
+			},
+			expected: []openclawv1alpha1.SelfConfigAction{openclawv1alpha1.SelfConfigActionEnvVars},
+		},
+		{
+			name: "multiple actions",
+			sc: &openclawv1alpha1.OpenClawSelfConfig{
+				Spec: openclawv1alpha1.OpenClawSelfConfigSpec{
+					AddSkills:         []string{"skill1"},
+					AddWorkspaceFiles: map[string]string{"file1": "content1"},
+					AddEnvVars:        []openclawv1alpha1.SelfConfigEnvVar{{Name: "TEST", Value: "value"}},
+				},
+			},
+			expected: []openclawv1alpha1.SelfConfigAction{
+				openclawv1alpha1.SelfConfigActionSkills,
+				openclawv1alpha1.SelfConfigActionWorkspaceFiles,
+				openclawv1alpha1.SelfConfigActionEnvVars,
+			},
 		},
 	}
 
-	sc := newTestSelfConfig()
-	sc.Spec.RemoveWorkspaceFiles = []string{"remove.md"}
-
-	applyWorkspaceFileChanges(instance, sc)
-
-	if _, ok := instance.Spec.Workspace.InitialFiles["remove.md"]; ok {
-		t.Error("remove.md should have been removed")
-	}
-	if instance.Spec.Workspace.InitialFiles["keep.md"] != "keep" {
-		t.Error("keep.md should be preserved")
-	}
-}
-
-func TestApplyEnvVarChanges_Add(t *testing.T) {
-	instance := newTestInstance()
-	instance.Spec.Env = []corev1.EnvVar{
-		{Name: "EXISTING", Value: "value1"},
-	}
-
-	sc := newTestSelfConfig()
-	sc.Spec.AddEnvVars = []openclawv1alpha1.SelfConfigEnvVar{
-		{Name: "NEW_VAR", Value: "new_value"},
-	}
-
-	if err := applyEnvVarChanges(instance, sc); err != nil {
-		t.Fatalf("applyEnvVarChanges failed: %v", err)
-	}
-
-	if len(instance.Spec.Env) != 2 {
-		t.Fatalf("expected 2 env vars, got %d", len(instance.Spec.Env))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := determineActions(tt.sc)
+			if len(result) != len(tt.expected) {
+				t.Errorf("expected %d actions, got %d", len(tt.expected), len(result))
+				return
+			}
+			for i, expected := range tt.expected {
+				if result[i] != expected {
+					t.Errorf("expected action %v at index %d, got %v", expected, i, result[i])
+				}
+			}
+		})
 	}
 }
 
-func TestApplyEnvVarChanges_Replace(t *testing.T) {
-	instance := newTestInstance()
-	instance.Spec.Env = []corev1.EnvVar{
-		{Name: "MY_VAR", Value: "old"},
+func TestCheckAllowedActions(t *testing.T) {
+	tests := []struct {
+		name      string
+		requested []openclawv1alpha1.SelfConfigAction
+		allowed   []openclawv1alpha1.SelfConfigAction
+		denied    []openclawv1alpha1.SelfConfigAction
+	}{
+		{
+			name:      "all allowed",
+			requested: []openclawv1alpha1.SelfConfigAction{openclawv1alpha1.SelfConfigActionSkills},
+			allowed:   []openclawv1alpha1.SelfConfigAction{openclawv1alpha1.SelfConfigActionSkills, openclawv1alpha1.SelfConfigActionConfig},
+			denied:    nil,
+		},
+		{
+			name:      "none allowed",
+			requested: []openclawv1alpha1.SelfConfigAction{openclawv1alpha1.SelfConfigActionSkills},
+			allowed:   []openclawv1alpha1.SelfConfigAction{openclawv1alpha1.SelfConfigActionConfig},
+			denied:    []openclawv1alpha1.SelfConfigAction{openclawv1alpha1.SelfConfigActionSkills},
+		},
+		{
+			name: "partially allowed",
+			requested: []openclawv1alpha1.SelfConfigAction{
+				openclawv1alpha1.SelfConfigActionSkills,
+				openclawv1alpha1.SelfConfigActionConfig,
+				openclawv1alpha1.SelfConfigActionEnvVars,
+			},
+			allowed: []openclawv1alpha1.SelfConfigAction{
+				openclawv1alpha1.SelfConfigActionSkills,
+				openclawv1alpha1.SelfConfigActionWorkspaceFiles,
+			},
+			denied: []openclawv1alpha1.SelfConfigAction{
+				openclawv1alpha1.SelfConfigActionConfig,
+				openclawv1alpha1.SelfConfigActionEnvVars,
+			},
+		},
+		{
+			name:      "empty requests",
+			requested: []openclawv1alpha1.SelfConfigAction{},
+			allowed:   []openclawv1alpha1.SelfConfigAction{openclawv1alpha1.SelfConfigActionSkills},
+			denied:    nil,
+		},
+		{
+			name:      "empty allowed",
+			requested: []openclawv1alpha1.SelfConfigAction{openclawv1alpha1.SelfConfigActionSkills},
+			allowed:   []openclawv1alpha1.SelfConfigAction{},
+			denied:    []openclawv1alpha1.SelfConfigAction{openclawv1alpha1.SelfConfigActionSkills},
+		},
 	}
 
-	sc := newTestSelfConfig()
-	sc.Spec.AddEnvVars = []openclawv1alpha1.SelfConfigEnvVar{
-		{Name: "MY_VAR", Value: "new"},
-	}
-
-	if err := applyEnvVarChanges(instance, sc); err != nil {
-		t.Fatalf("applyEnvVarChanges failed: %v", err)
-	}
-
-	if len(instance.Spec.Env) != 1 {
-		t.Fatalf("expected 1 env var, got %d", len(instance.Spec.Env))
-	}
-	if instance.Spec.Env[0].Value != "new" {
-		t.Errorf("expected value 'new', got %q", instance.Spec.Env[0].Value)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := checkAllowedActions(tt.requested, tt.allowed)
+			if len(result) != len(tt.denied) {
+				t.Errorf("expected %d denied actions, got %d", len(tt.denied), len(result))
+				return
+			}
+			for i, expected := range tt.denied {
+				if result[i] != expected {
+					t.Errorf("expected denied action %v at index %d, got %v", expected, i, result[i])
+				}
+			}
+		})
 	}
 }
 
-func TestApplyEnvVarChanges_Remove(t *testing.T) {
-	instance := newTestInstance()
-	instance.Spec.Env = []corev1.EnvVar{
-		{Name: "KEEP", Value: "yes"},
-		{Name: "REMOVE", Value: "bye"},
+func TestApplySkillChanges(t *testing.T) {
+	tests := []struct {
+		name     string
+		initial  []string
+		sc       *openclawv1alpha1.OpenClawSelfConfig
+		expected []string
+	}{
+		{
+			name:    "add to empty",
+			initial: []string{},
+			sc: &openclawv1alpha1.OpenClawSelfConfig{
+				Spec: openclawv1alpha1.OpenClawSelfConfigSpec{
+					AddSkills: []string{"skill1", "skill2"},
+				},
+			},
+			expected: []string{"skill1", "skill2"},
+		},
+		{
+			name:    "add to existing",
+			initial: []string{"skill1"},
+			sc: &openclawv1alpha1.OpenClawSelfConfig{
+				Spec: openclawv1alpha1.OpenClawSelfConfigSpec{
+					AddSkills: []string{"skill2", "skill3"},
+				},
+			},
+			expected: []string{"skill1", "skill2", "skill3"},
+		},
+		{
+			name:    "add duplicate (should deduplicate)",
+			initial: []string{"skill1"},
+			sc: &openclawv1alpha1.OpenClawSelfConfig{
+				Spec: openclawv1alpha1.OpenClawSelfConfigSpec{
+					AddSkills: []string{"skill1", "skill2"},
+				},
+			},
+			expected: []string{"skill1", "skill2"},
+		},
+		{
+			name:    "remove from existing",
+			initial: []string{"skill1", "skill2", "skill3"},
+			sc: &openclawv1alpha1.OpenClawSelfConfig{
+				Spec: openclawv1alpha1.OpenClawSelfConfigSpec{
+					RemoveSkills: []string{"skill2"},
+				},
+			},
+			expected: []string{"skill1", "skill3"},
+		},
+		{
+			name:    "remove non-existent (should be no-op)",
+			initial: []string{"skill1"},
+			sc: &openclawv1alpha1.OpenClawSelfConfig{
+				Spec: openclawv1alpha1.OpenClawSelfConfigSpec{
+					RemoveSkills: []string{"skill2"},
+				},
+			},
+			expected: []string{"skill1"},
+		},
+		{
+			name:    "add and remove",
+			initial: []string{"skill1", "skill2"},
+			sc: &openclawv1alpha1.OpenClawSelfConfig{
+				Spec: openclawv1alpha1.OpenClawSelfConfigSpec{
+					RemoveSkills: []string{"skill1"},
+					AddSkills:    []string{"skill3"},
+				},
+			},
+			expected: []string{"skill2", "skill3"},
+		},
 	}
 
-	sc := newTestSelfConfig()
-	sc.Spec.RemoveEnvVars = []string{"REMOVE"}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			instance := &openclawv1alpha1.OpenClawInstance{
+				Spec: openclawv1alpha1.OpenClawInstanceSpec{
+					Skills: make([]string, len(tt.initial)),
+				},
+			}
+			copy(instance.Spec.Skills, tt.initial)
 
-	if err := applyEnvVarChanges(instance, sc); err != nil {
-		t.Fatalf("applyEnvVarChanges failed: %v", err)
-	}
+			applySkillChanges(instance, tt.sc)
 
-	if len(instance.Spec.Env) != 1 || instance.Spec.Env[0].Name != "KEEP" {
-		t.Error("should only have KEEP env var")
+			if len(instance.Spec.Skills) != len(tt.expected) {
+				t.Errorf("expected %d skills, got %d", len(tt.expected), len(instance.Spec.Skills))
+				return
+			}
+			for i, expected := range tt.expected {
+				if instance.Spec.Skills[i] != expected {
+					t.Errorf("expected skill %q at index %d, got %q", expected, i, instance.Spec.Skills[i])
+				}
+			}
+		})
 	}
 }
 
-func TestApplyEnvVarChanges_ProtectedAdd(t *testing.T) {
-	instance := newTestInstance()
-
-	sc := newTestSelfConfig()
-	sc.Spec.AddEnvVars = []openclawv1alpha1.SelfConfigEnvVar{
-		{Name: "HOME", Value: "/hacked"},
+func TestApplyConfigPatch(t *testing.T) {
+	tests := []struct {
+		name        string
+		initial     map[string]interface{}
+		patch       map[string]interface{}
+		expectError bool
+		errorMsg    string
+		expected    map[string]interface{}
+	}{
+		{
+			name:    "nil patch",
+			initial: map[string]interface{}{"key": "value"},
+			patch:   nil,
+			expected: map[string]interface{}{"key": "value"},
+		},
+		{
+			name:    "simple patch",
+			initial: map[string]interface{}{"key1": "value1"},
+			patch:   map[string]interface{}{"key2": "value2"},
+			expected: map[string]interface{}{
+				"key1": "value1",
+				"key2": "value2",
+			},
+		},
+		{
+			name:        "protected key",
+			initial:     map[string]interface{}{"key": "value"},
+			patch:       map[string]interface{}{"gateway": "blocked"},
+			expectError: true,
+			errorMsg:    "config key \"gateway\" is protected",
+		},
+		{
+			name:    "nested merge",
+			initial: map[string]interface{}{
+				"agents": map[string]interface{}{
+					"list": []interface{}{
+						map[string]interface{}{"name": "agent1"},
+					},
+				},
+			},
+			patch: map[string]interface{}{
+				"agents": map[string]interface{}{
+					"timeout": "30s",
+				},
+			},
+			expected: map[string]interface{}{
+				"agents": map[string]interface{}{
+					"list": []interface{}{
+						map[string]interface{}{"name": "agent1"},
+					},
+					"timeout": "30s",
+				},
+			},
+		},
+		{
+			name:    "empty base config",
+			initial: nil,
+			patch:   map[string]interface{}{"key": "value"},
+			expected: map[string]interface{}{"key": "value"},
+		},
 	}
 
-	err := applyEnvVarChanges(instance, sc)
-	if err == nil {
-		t.Error("expected error for protected env var HOME")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			instance := &openclawv1alpha1.OpenClawInstance{
+				Spec: openclawv1alpha1.OpenClawInstanceSpec{
+					Config: openclawv1alpha1.ConfigSpec{},
+				},
+			}
+
+			// Set up initial config
+			if tt.initial != nil {
+				initialJSON, _ := json.Marshal(tt.initial)
+				instance.Spec.Config.Raw = &openclawv1alpha1.RawConfig{
+					RawExtension: runtime.RawExtension{Raw: initialJSON},
+				}
+			}
+
+			// Create self-config with patch
+			sc := &openclawv1alpha1.OpenClawSelfConfig{}
+			if tt.patch != nil {
+				patchJSON, _ := json.Marshal(tt.patch)
+				sc.Spec.ConfigPatch = &openclawv1alpha1.RawConfig{
+					RawExtension: runtime.RawExtension{Raw: patchJSON},
+				}
+			}
+
+			err := applyConfigPatch(instance, sc)
+
+			if tt.expectError {
+				if err == nil {
+					t.Errorf("expected error containing %q, got nil", tt.errorMsg)
+					return
+				}
+				if tt.errorMsg != "" && !contains(err.Error(), tt.errorMsg) {
+					t.Errorf("expected error containing %q, got %q", tt.errorMsg, err.Error())
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+				return
+			}
+
+			// Check result
+			if tt.expected != nil {
+				var result map[string]interface{}
+				if instance.Spec.Config.Raw != nil {
+					json.Unmarshal(instance.Spec.Config.Raw.Raw, &result)
+				}
+
+				expectedJSON, _ := json.Marshal(tt.expected)
+				resultJSON, _ := json.Marshal(result)
+
+				if string(expectedJSON) != string(resultJSON) {
+					t.Errorf("expected %s, got %s", string(expectedJSON), string(resultJSON))
+				}
+			}
+		})
 	}
 }
 
-func TestApplyEnvVarChanges_ProtectedRemove(t *testing.T) {
-	instance := newTestInstance()
+func TestApplyWorkspaceFileChanges(t *testing.T) {
+	tests := []struct {
+		name     string
+		initial  map[string]string
+		sc       *openclawv1alpha1.OpenClawSelfConfig
+		expected map[string]string
+	}{
+		{
+			name:    "add to nil workspace",
+			initial: nil,
+			sc: &openclawv1alpha1.OpenClawSelfConfig{
+				Spec: openclawv1alpha1.OpenClawSelfConfigSpec{
+					AddWorkspaceFiles: map[string]string{"file1": "content1"},
+				},
+			},
+			expected: map[string]string{"file1": "content1"},
+		},
+		{
+			name:    "add to existing",
+			initial: map[string]string{"file1": "content1"},
+			sc: &openclawv1alpha1.OpenClawSelfConfig{
+				Spec: openclawv1alpha1.OpenClawSelfConfigSpec{
+					AddWorkspaceFiles: map[string]string{"file2": "content2"},
+				},
+			},
+			expected: map[string]string{
+				"file1": "content1",
+				"file2": "content2",
+			},
+		},
+		{
+			name:    "remove files",
+			initial: map[string]string{"file1": "content1", "file2": "content2"},
+			sc: &openclawv1alpha1.OpenClawSelfConfig{
+				Spec: openclawv1alpha1.OpenClawSelfConfigSpec{
+					RemoveWorkspaceFiles: []string{"file1"},
+				},
+			},
+			expected: map[string]string{"file2": "content2"},
+		},
+		{
+			name:    "add and remove",
+			initial: map[string]string{"file1": "content1"},
+			sc: &openclawv1alpha1.OpenClawSelfConfig{
+				Spec: openclawv1alpha1.OpenClawSelfConfigSpec{
+					RemoveWorkspaceFiles: []string{"file1"},
+					AddWorkspaceFiles:    map[string]string{"file2": "content2"},
+				},
+			},
+			expected: map[string]string{"file2": "content2"},
+		},
+		{
+			name:    "overwrite existing file",
+			initial: map[string]string{"file1": "old content"},
+			sc: &openclawv1alpha1.OpenClawSelfConfig{
+				Spec: openclawv1alpha1.OpenClawSelfConfigSpec{
+					AddWorkspaceFiles: map[string]string{"file1": "new content"},
+				},
+			},
+			expected: map[string]string{"file1": "new content"},
+		},
+	}
 
-	sc := newTestSelfConfig()
-	sc.Spec.RemoveEnvVars = []string{"OPENCLAW_GATEWAY_TOKEN"}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			instance := &openclawv1alpha1.OpenClawInstance{}
+			if tt.initial != nil {
+				instance.Spec.Workspace = &openclawv1alpha1.WorkspaceSpec{
+					InitialFiles: make(map[string]string),
+				}
+				for k, v := range tt.initial {
+					instance.Spec.Workspace.InitialFiles[k] = v
+				}
+			}
 
-	err := applyEnvVarChanges(instance, sc)
-	if err == nil {
-		t.Error("expected error for removing protected env var OPENCLAW_GATEWAY_TOKEN")
+			applyWorkspaceFileChanges(instance, tt.sc)
+
+			if len(instance.Spec.Workspace.InitialFiles) != len(tt.expected) {
+				t.Errorf("expected %d files, got %d", len(tt.expected), len(instance.Spec.Workspace.InitialFiles))
+				return
+			}
+
+			for k, expectedV := range tt.expected {
+				if actualV, ok := instance.Spec.Workspace.InitialFiles[k]; !ok {
+					t.Errorf("expected file %q not found", k)
+				} else if actualV != expectedV {
+					t.Errorf("expected file %q to have content %q, got %q", k, expectedV, actualV)
+				}
+			}
+		})
+	}
+}
+
+func TestApplyEnvVarChanges(t *testing.T) {
+	tests := []struct {
+		name        string
+		initial     []corev1.EnvVar
+		sc          *openclawv1alpha1.OpenClawSelfConfig
+		expected    []corev1.EnvVar
+		expectError bool
+		errorMsg    string
+	}{
+		{
+			name:    "add to empty",
+			initial: []corev1.EnvVar{},
+			sc: &openclawv1alpha1.OpenClawSelfConfig{
+				Spec: openclawv1alpha1.OpenClawSelfConfigSpec{
+					AddEnvVars: []openclawv1alpha1.SelfConfigEnvVar{{Name: "TEST", Value: "value"}},
+				},
+			},
+			expected: []corev1.EnvVar{{Name: "TEST", Value: "value"}},
+		},
+		{
+			name:    "add to existing",
+			initial: []corev1.EnvVar{{Name: "EXISTING", Value: "value1"}},
+			sc: &openclawv1alpha1.OpenClawSelfConfig{
+				Spec: openclawv1alpha1.OpenClawSelfConfigSpec{
+					AddEnvVars: []openclawv1alpha1.SelfConfigEnvVar{{Name: "TEST", Value: "value2"}},
+				},
+			},
+			expected: []corev1.EnvVar{
+				{Name: "EXISTING", Value: "value1"},
+				{Name: "TEST", Value: "value2"},
+			},
+		},
+		{
+			name:    "replace existing",
+			initial: []corev1.EnvVar{{Name: "TEST", Value: "oldvalue"}},
+			sc: &openclawv1alpha1.OpenClawSelfConfig{
+				Spec: openclawv1alpha1.OpenClawSelfConfigSpec{
+					AddEnvVars: []openclawv1alpha1.SelfConfigEnvVar{{Name: "TEST", Value: "newvalue"}},
+				},
+			},
+			expected: []corev1.EnvVar{{Name: "TEST", Value: "newvalue"}},
+		},
+		{
+			name:    "remove env var",
+			initial: []corev1.EnvVar{{Name: "TEST", Value: "value"}, {Name: "KEEP", Value: "value"}},
+			sc: &openclawv1alpha1.OpenClawSelfConfig{
+				Spec: openclawv1alpha1.OpenClawSelfConfigSpec{
+					RemoveEnvVars: []string{"TEST"},
+				},
+			},
+			expected: []corev1.EnvVar{{Name: "KEEP", Value: "value"}},
+		},
+		{
+			name:    "remove non-existent env var",
+			initial: []corev1.EnvVar{{Name: "KEEP", Value: "value"}},
+			sc: &openclawv1alpha1.OpenClawSelfConfig{
+				Spec: openclawv1alpha1.OpenClawSelfConfigSpec{
+					RemoveEnvVars: []string{"NONEXISTENT"},
+				},
+			},
+			expected: []corev1.EnvVar{{Name: "KEEP", Value: "value"}},
+		},
+		{
+			name:        "add protected env var",
+			initial:     []corev1.EnvVar{},
+			sc: &openclawv1alpha1.OpenClawSelfConfig{
+				Spec: openclawv1alpha1.OpenClawSelfConfigSpec{
+					AddEnvVars: []openclawv1alpha1.SelfConfigEnvVar{{Name: "HOME", Value: "/tmp"}},
+				},
+			},
+			expectError: true,
+			errorMsg:    "environment variable \"HOME\" is protected",
+		},
+		{
+			name:    "remove protected env var",
+			initial: []corev1.EnvVar{{Name: "HOME", Value: "/home/user"}},
+			sc: &openclawv1alpha1.OpenClawSelfConfig{
+				Spec: openclawv1alpha1.OpenClawSelfConfigSpec{
+					RemoveEnvVars: []string{"HOME"},
+				},
+			},
+			expectError: true,
+			errorMsg:    "environment variable \"HOME\" is protected",
+		},
+		{
+			name:    "add and remove in same operation",
+			initial: []corev1.EnvVar{{Name: "OLD", Value: "value"}, {Name: "KEEP", Value: "value"}},
+			sc: &openclawv1alpha1.OpenClawSelfConfig{
+				Spec: openclawv1alpha1.OpenClawSelfConfigSpec{
+					RemoveEnvVars: []string{"OLD"},
+					AddEnvVars:    []openclawv1alpha1.SelfConfigEnvVar{{Name: "NEW", Value: "value"}},
+				},
+			},
+			expected: []corev1.EnvVar{
+				{Name: "KEEP", Value: "value"},
+				{Name: "NEW", Value: "value"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			instance := &openclawv1alpha1.OpenClawInstance{
+				Spec: openclawv1alpha1.OpenClawInstanceSpec{
+					Env: make([]corev1.EnvVar, len(tt.initial)),
+				},
+			}
+			copy(instance.Spec.Env, tt.initial)
+
+			err := applyEnvVarChanges(instance, tt.sc)
+
+			if tt.expectError {
+				if err == nil {
+					t.Errorf("expected error containing %q, got nil", tt.errorMsg)
+					return
+				}
+				if tt.errorMsg != "" && !contains(err.Error(), tt.errorMsg) {
+					t.Errorf("expected error containing %q, got %q", tt.errorMsg, err.Error())
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+				return
+			}
+
+			if len(instance.Spec.Env) != len(tt.expected) {
+				t.Errorf("expected %d env vars, got %d", len(tt.expected), len(instance.Spec.Env))
+				return
+			}
+
+			for i, expected := range tt.expected {
+				if instance.Spec.Env[i].Name != expected.Name || instance.Spec.Env[i].Value != expected.Value {
+					t.Errorf("expected env var %v at index %d, got %v", expected, i, instance.Spec.Env[i])
+				}
+			}
+		})
 	}
 }
 
 func TestDeepMerge(t *testing.T) {
-	dst := map[string]interface{}{
-		"a": "1",
-		"b": map[string]interface{}{
-			"c": "2",
-			"d": "3",
+	tests := []struct {
+		name     string
+		dst      map[string]interface{}
+		src      map[string]interface{}
+		expected map[string]interface{}
+	}{
+		{
+			name: "simple merge",
+			dst:  map[string]interface{}{"a": 1},
+			src:  map[string]interface{}{"b": 2},
+			expected: map[string]interface{}{
+				"a": 1,
+				"b": 2,
+			},
+		},
+		{
+			name: "override existing",
+			dst:  map[string]interface{}{"a": 1},
+			src:  map[string]interface{}{"a": 2},
+			expected: map[string]interface{}{
+				"a": 2,
+			},
+		},
+		{
+			name: "nested merge",
+			dst: map[string]interface{}{
+				"config": map[string]interface{}{
+					"setting1": "value1",
+					"setting2": "value2",
+				},
+			},
+			src: map[string]interface{}{
+				"config": map[string]interface{}{
+					"setting2": "newvalue2",
+					"setting3": "value3",
+				},
+			},
+			expected: map[string]interface{}{
+				"config": map[string]interface{}{
+					"setting1": "value1",
+					"setting2": "newvalue2",
+					"setting3": "value3",
+				},
+			},
+		},
+		{
+			name: "array replacement",
+			dst:  map[string]interface{}{"arr": []interface{}{1, 2}},
+			src:  map[string]interface{}{"arr": []interface{}{3, 4}},
+			expected: map[string]interface{}{
+				"arr": []interface{}{3, 4},
+			},
+		},
+		{
+			name: "mixed types",
+			dst: map[string]interface{}{
+				"str":  "hello",
+				"num":  42,
+				"bool": true,
+				"obj":  map[string]interface{}{"nested": "value"},
+			},
+			src: map[string]interface{}{
+				"str": "world",
+				"obj": map[string]interface{}{"nested": "newvalue", "added": "field"},
+			},
+			expected: map[string]interface{}{
+				"str":  "world",
+				"num":  42,
+				"bool": true,
+				"obj":  map[string]interface{}{"nested": "newvalue", "added": "field"},
+			},
+		},
+		{
+			name:     "empty dst",
+			dst:      map[string]interface{}{},
+			src:      map[string]interface{}{"key": "value"},
+			expected: map[string]interface{}{"key": "value"},
+		},
+		{
+			name:     "empty src",
+			dst:      map[string]interface{}{"key": "value"},
+			src:      map[string]interface{}{},
+			expected: map[string]interface{}{"key": "value"},
 		},
 	}
-	src := map[string]interface{}{
-		"b": map[string]interface{}{
-			"d": "4",
-			"e": "5",
-		},
-		"f": "6",
-	}
 
-	result := deepMerge(dst, src)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := deepMerge(tt.dst, tt.src)
+			
+			// Convert to JSON for easy comparison
+			expectedJSON, _ := json.Marshal(tt.expected)
+			resultJSON, _ := json.Marshal(result)
+			
+			if string(expectedJSON) != string(resultJSON) {
+				t.Errorf("expected %s, got %s", string(expectedJSON), string(resultJSON))
+			}
+		})
+	}
+}
 
-	if result["a"] != "1" {
-		t.Error("a should be preserved")
+// Helper function for string contains check
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(substr) == 0 || (len(s) > len(substr) && s[:len(substr)] == substr) || 
+		(len(s) > len(substr) && s[len(s)-len(substr):] == substr) || 
+		(len(s) > len(substr) && findSubstring(s, substr)))
+}
+
+func findSubstring(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
 	}
-	b, ok := result["b"].(map[string]interface{})
-	if !ok {
-		t.Fatal("b should be a map")
-	}
-	if b["c"] != "2" {
-		t.Error("b.c should be preserved")
-	}
-	if b["d"] != "4" {
-		t.Error("b.d should be overwritten by src")
-	}
-	if b["e"] != "5" {
-		t.Error("b.e should be added from src")
-	}
-	if result["f"] != "6" {
-		t.Error("f should be added from src")
-	}
+	return false
 }
