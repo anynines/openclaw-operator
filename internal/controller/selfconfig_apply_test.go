@@ -18,6 +18,7 @@ package controller
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -25,7 +26,6 @@ import (
 
 	openclawv1alpha1 "github.com/openclawrocks/openclaw-operator/api/v1alpha1"
 )
-
 
 func TestDetermineActions(t *testing.T) {
 	tests := []struct {
@@ -110,6 +110,21 @@ func TestDetermineActions(t *testing.T) {
 					AddSkills:         []string{"skill1"},
 					AddWorkspaceFiles: map[string]string{"file1": "content1"},
 					AddEnvVars:        []openclawv1alpha1.SelfConfigEnvVar{{Name: "TEST", Value: "value"}},
+				},
+			},
+			expected: []openclawv1alpha1.SelfConfigAction{
+				openclawv1alpha1.SelfConfigActionSkills,
+				openclawv1alpha1.SelfConfigActionWorkspaceFiles,
+				openclawv1alpha1.SelfConfigActionEnvVars,
+			},
+		},
+		{
+			name: "remove operations also trigger actions",
+			sc: &openclawv1alpha1.OpenClawSelfConfig{
+				Spec: openclawv1alpha1.OpenClawSelfConfigSpec{
+					RemoveSkills:         []string{"skill1"},
+					RemoveWorkspaceFiles: []string{"file1"},
+					RemoveEnvVars:        []string{"TEST"},
 				},
 			},
 			expected: []openclawv1alpha1.SelfConfigAction{
@@ -298,47 +313,72 @@ func TestApplySkillChanges(t *testing.T) {
 func TestApplyConfigPatch(t *testing.T) {
 	tests := []struct {
 		name        string
-		initial     map[string]interface{}
-		patch       map[string]interface{}
+		initial     *openclawv1alpha1.RawConfig
+		patch       *openclawv1alpha1.RawConfig
+		expected    map[string]interface{}
 		expectError bool
 		errorMsg    string
-		expected    map[string]interface{}
 	}{
 		{
-			name:    "nil patch",
-			initial: map[string]interface{}{"key": "value"},
-			patch:   nil,
+			name:    "patch empty config",
+			initial: nil,
+			patch: &openclawv1alpha1.RawConfig{
+				RawExtension: runtime.RawExtension{Raw: []byte(`{"key":"value"}`)},
+			},
 			expected: map[string]interface{}{"key": "value"},
 		},
 		{
-			name:    "simple patch",
-			initial: map[string]interface{}{"key1": "value1"},
-			patch:   map[string]interface{}{"key2": "value2"},
+			name: "merge with existing",
+			initial: &openclawv1alpha1.RawConfig{
+				RawExtension: runtime.RawExtension{Raw: []byte(`{"existing":"value"}`)},
+			},
+			patch: &openclawv1alpha1.RawConfig{
+				RawExtension: runtime.RawExtension{Raw: []byte(`{"new":"value"}`)},
+			},
 			expected: map[string]interface{}{
-				"key1": "value1",
-				"key2": "value2",
+				"existing": "value",
+				"new":      "value",
 			},
 		},
 		{
-			name:        "protected key",
-			initial:     map[string]interface{}{"key": "value"},
-			patch:       map[string]interface{}{"gateway": "blocked"},
+			name:     "nil patch",
+			initial:  nil,
+			patch:    nil,
+			expected: nil,
+		},
+		{
+			name:    "empty patch",
+			initial: nil,
+			patch: &openclawv1alpha1.RawConfig{
+				RawExtension: runtime.RawExtension{Raw: []byte{}},
+			},
+			expected: nil,
+		},
+		{
+			name:    "protected key",
+			initial: nil,
+			patch: &openclawv1alpha1.RawConfig{
+				RawExtension: runtime.RawExtension{Raw: []byte(`{"gateway":"blocked"}`)},
+			},
 			expectError: true,
 			errorMsg:    "config key \"gateway\" is protected",
 		},
 		{
-			name:    "nested merge",
-			initial: map[string]interface{}{
-				"agents": map[string]interface{}{
-					"list": []interface{}{
-						map[string]interface{}{"name": "agent1"},
-					},
-				},
+			name:    "invalid JSON",
+			initial: nil,
+			patch: &openclawv1alpha1.RawConfig{
+				RawExtension: runtime.RawExtension{Raw: []byte(`{invalid}`)},
 			},
-			patch: map[string]interface{}{
-				"agents": map[string]interface{}{
-					"timeout": "30s",
-				},
+			expectError: true,
+			errorMsg:    "invalid config patch JSON",
+		},
+		{
+			name: "nested merge",
+			initial: &openclawv1alpha1.RawConfig{
+				RawExtension: runtime.RawExtension{Raw: []byte(`{"agents":{"list":[{"name":"agent1"}]}}`)},
+			},
+			patch: &openclawv1alpha1.RawConfig{
+				RawExtension: runtime.RawExtension{Raw: []byte(`{"agents":{"timeout":"30s"}}`)},
 			},
 			expected: map[string]interface{}{
 				"agents": map[string]interface{}{
@@ -348,12 +388,6 @@ func TestApplyConfigPatch(t *testing.T) {
 					"timeout": "30s",
 				},
 			},
-		},
-		{
-			name:    "empty base config",
-			initial: nil,
-			patch:   map[string]interface{}{"key": "value"},
-			expected: map[string]interface{}{"key": "value"},
 		},
 	}
 
@@ -361,25 +395,15 @@ func TestApplyConfigPatch(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			instance := &openclawv1alpha1.OpenClawInstance{
 				Spec: openclawv1alpha1.OpenClawInstanceSpec{
-					Config: openclawv1alpha1.ConfigSpec{},
+					Config: openclawv1alpha1.ConfigSpec{
+						Raw: tt.initial,
+					},
 				},
 			}
-
-			// Set up initial config
-			if tt.initial != nil {
-				initialJSON, _ := json.Marshal(tt.initial)
-				instance.Spec.Config.Raw = &openclawv1alpha1.RawConfig{
-					RawExtension: runtime.RawExtension{Raw: initialJSON},
-				}
-			}
-
-			// Create self-config with patch
-			sc := &openclawv1alpha1.OpenClawSelfConfig{}
-			if tt.patch != nil {
-				patchJSON, _ := json.Marshal(tt.patch)
-				sc.Spec.ConfigPatch = &openclawv1alpha1.RawConfig{
-					RawExtension: runtime.RawExtension{Raw: patchJSON},
-				}
+			sc := &openclawv1alpha1.OpenClawSelfConfig{
+				Spec: openclawv1alpha1.OpenClawSelfConfigSpec{
+					ConfigPatch: tt.patch,
+				},
 			}
 
 			err := applyConfigPatch(instance, sc)
@@ -389,7 +413,7 @@ func TestApplyConfigPatch(t *testing.T) {
 					t.Errorf("expected error containing %q, got nil", tt.errorMsg)
 					return
 				}
-				if tt.errorMsg != "" && !contains(err.Error(), tt.errorMsg) {
+				if tt.errorMsg != "" && !strings.Contains(err.Error(), tt.errorMsg) {
 					t.Errorf("expected error containing %q, got %q", tt.errorMsg, err.Error())
 				}
 				return
@@ -401,18 +425,36 @@ func TestApplyConfigPatch(t *testing.T) {
 			}
 
 			// Check result
-			if tt.expected != nil {
-				var result map[string]interface{}
-				if instance.Spec.Config.Raw != nil {
-					json.Unmarshal(instance.Spec.Config.Raw.Raw, &result)
+			if tt.expected == nil {
+				if tt.initial == nil {
+					if instance.Spec.Config.Raw != nil && len(instance.Spec.Config.Raw.Raw) > 0 {
+						t.Errorf("expected nil config, but got %s", string(instance.Spec.Config.Raw.Raw))
+					}
+				} else {
+					// Should remain unchanged
+					if string(instance.Spec.Config.Raw.Raw) != string(tt.initial.Raw) {
+						t.Errorf("expected config to remain unchanged")
+					}
 				}
+				return
+			}
 
-				expectedJSON, _ := json.Marshal(tt.expected)
-				resultJSON, _ := json.Marshal(result)
+			if instance.Spec.Config.Raw == nil {
+				t.Errorf("expected config to be set, but got nil")
+				return
+			}
 
-				if string(expectedJSON) != string(resultJSON) {
-					t.Errorf("expected %s, got %s", string(expectedJSON), string(resultJSON))
-				}
+			var result map[string]interface{}
+			if err := json.Unmarshal(instance.Spec.Config.Raw.Raw, &result); err != nil {
+				t.Errorf("failed to unmarshal result config: %v", err)
+				return
+			}
+
+			expectedJSON, _ := json.Marshal(tt.expected)
+			resultJSON, _ := json.Marshal(result)
+
+			if string(expectedJSON) != string(resultJSON) {
+				t.Errorf("expected %s, got %s", string(expectedJSON), string(resultJSON))
 			}
 		})
 	}
@@ -754,18 +796,3 @@ func TestDeepMerge(t *testing.T) {
 	}
 }
 
-// Helper function for string contains check
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(substr) == 0 || (len(s) > len(substr) && s[:len(substr)] == substr) || 
-		(len(s) > len(substr) && s[len(s)-len(substr):] == substr) || 
-		(len(s) > len(substr) && findSubstring(s, substr)))
-}
-
-func findSubstring(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
-}
