@@ -162,7 +162,7 @@ servicePlans:
       agents:
         defaults:
           model:
-            primary: "openrouter/anthropic/claude-sonnet-4-6"
+            primary: "openrouter/anthropic/claude-sonnet-4.6"
             fallbacks:
               - "openrouter/openai/gpt-5.1-codex"
     overridable:

@@ -76,7 +76,7 @@ It should not be read as the permanent long-term Architect routing/provider desi
 
 Current default model refs in the plan:
 
-- primary: `openrouter/anthropic/claude-sonnet-4-6`
+- primary: `openrouter/anthropic/claude-sonnet-4.6`
 - fallback: `openrouter/openai/gpt-5.1-codex`
 
 ### What the plan means for users
