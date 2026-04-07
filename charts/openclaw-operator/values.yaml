@@ -142,7 +142,36 @@ networkPolicy:
 #     overridable:
 #       - config
 #       - storage.size
-servicePlans: {}
+servicePlans:
+  architect-juno:
+    displayName: "Architect Juno"
+    description: >-
+      First Architect-Bot baseline for serious interactive product and architecture
+      work. v1 intentionally uses an OpenRouter-only transition posture for model
+      refs until the direct-provider/router path is materialized.
+    resources:
+      requests:
+        cpu: "1"
+        memory: "4Gi"
+      limits:
+        cpu: "4"
+        memory: "8Gi"
+    storage:
+      size: "20Gi"
+    config:
+      agents:
+        defaults:
+          model:
+            primary: "openrouter/anthropic/claude-sonnet-4-6"
+            fallbacks:
+              - "openrouter/openai/gpt-5.1-codex"
+    overridable:
+      - config
+      - resources.requests.cpu
+      - resources.requests.memory
+      - resources.limits.cpu
+      - resources.limits.memory
+      - storage.size
 
 # CRD installation
 crds:

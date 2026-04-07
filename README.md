@@ -1114,6 +1114,19 @@ spec:
 
 Phases: `Pending` -> `Restoring` -> `Provisioning` -> `Running` | `Updating` | `BackingUp` | `Degraded` | `Failed` | `Terminating`
 
+## Service Plans
+
+The operator can publish named service plans via Helm `servicePlans`, which are exposed to the controller as `SERVICE_PLANS_JSON` and selected by instances with `spec.plan`.
+
+The first concrete catalog entry is `architect-juno`, a serious Architect-Bot baseline with documented resource defaults and an explicit temporary OpenRouter-only v1 model posture.
+
+See [Service Plans](docs/service-plans.md) for:
+
+- what a service plan is
+- how to query the configured plan catalog
+- `architect-juno` details
+- a reserved comparison slot for future plans such as `architect-ceres`
+
 ## Deployment Guides
 
 Platform-specific deployment guides are available for:
