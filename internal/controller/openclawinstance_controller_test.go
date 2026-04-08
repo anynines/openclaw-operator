@@ -293,7 +293,7 @@ var _ = Describe("OpenClawInstance Controller", func() {
 				},
 			}
 
-			np := resources.BuildNetworkPolicy(instance)
+			np := resources.BuildNetworkPolicy(instance, "")
 
 			// Verify policy types
 			Expect(np.Spec.PolicyTypes).To(ContainElements(

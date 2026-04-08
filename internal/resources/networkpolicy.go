@@ -25,9 +25,11 @@ import (
 	openclawv1alpha1 "github.com/openclawrocks/openclaw-operator/api/v1alpha1"
 )
 
-// BuildNetworkPolicy creates a NetworkPolicy for the OpenClawInstance
-// This implements a default-deny with selective allowlist approach
-func BuildNetworkPolicy(instance *openclawv1alpha1.OpenClawInstance) *networkingv1.NetworkPolicy {
+// BuildNetworkPolicy creates a NetworkPolicy for the OpenClawInstance.
+// This implements a default-deny with selective allowlist approach.
+// operatorNamespace allows narrowly scoped control-plane ingress from the
+// operator's namespace for health checks and reconcile traffic.
+func BuildNetworkPolicy(instance *openclawv1alpha1.OpenClawInstance, operatorNamespace string) *networkingv1.NetworkPolicy {
 	labels := Labels(instance)
 	selectorLabels := SelectorLabels(instance)
 
@@ -45,7 +47,7 @@ func BuildNetworkPolicy(instance *openclawv1alpha1.OpenClawInstance) *networking
 				networkingv1.PolicyTypeIngress,
 				networkingv1.PolicyTypeEgress,
 			},
-			Ingress: buildIngressRules(instance),
+			Ingress: buildIngressRules(instance, operatorNamespace),
 			Egress:  buildEgressRules(instance),
 		},
 	}
@@ -125,24 +127,30 @@ func networkPolicyIngressPorts(instance *openclawv1alpha1.OpenClawInstance) []ne
 	return ports
 }
 
-// buildIngressRules creates the ingress rules for the NetworkPolicy
-func buildIngressRules(instance *openclawv1alpha1.OpenClawInstance) []networkingv1.NetworkPolicyIngressRule {
+// buildIngressRules creates the ingress rules for the NetworkPolicy.
+func buildIngressRules(instance *openclawv1alpha1.OpenClawInstance, operatorNamespace string) []networkingv1.NetworkPolicyIngressRule {
 	rules := []networkingv1.NetworkPolicyIngressRule{}
 	npPorts := networkPolicyIngressPorts(instance)
+	allowedNamespaces := []string{instance.Namespace}
 
-	// Allow from same namespace by default
-	rules = append(rules, networkingv1.NetworkPolicyIngressRule{
-		From: []networkingv1.NetworkPolicyPeer{
-			{
-				NamespaceSelector: &metav1.LabelSelector{
-					MatchLabels: map[string]string{
-						"kubernetes.io/metadata.name": instance.Namespace,
+	if operatorNamespace != "" && operatorNamespace != instance.Namespace {
+		allowedNamespaces = append(allowedNamespaces, operatorNamespace)
+	}
+
+	for _, ns := range allowedNamespaces {
+		rules = append(rules, networkingv1.NetworkPolicyIngressRule{
+			From: []networkingv1.NetworkPolicyPeer{
+				{
+					NamespaceSelector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{
+							"kubernetes.io/metadata.name": ns,
+						},
 					},
 				},
 			},
-		},
-		Ports: npPorts,
-	})
+			Ports: npPorts,
+		})
+	}
 
 	// Allow from specified namespaces
 	for _, ns := range instance.Spec.Security.NetworkPolicy.AllowedIngressNamespaces {

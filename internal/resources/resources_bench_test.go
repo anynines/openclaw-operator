@@ -176,7 +176,7 @@ func BenchmarkBuildNetworkPolicy_Minimal(b *testing.B) {
 	instance := newBenchInstance()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		BuildNetworkPolicy(instance)
+		BuildNetworkPolicy(instance, "")
 	}
 }
 
@@ -184,7 +184,7 @@ func BenchmarkBuildNetworkPolicy_FullyLoaded(b *testing.B) {
 	instance := newFullBenchInstance()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		BuildNetworkPolicy(instance)
+		BuildNetworkPolicy(instance, "")
 	}
 }
 

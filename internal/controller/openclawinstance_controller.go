@@ -576,7 +576,7 @@ func (r *OpenClawInstanceReconciler) reconcileNetworkPolicy(ctx context.Context,
 		},
 	}
 	if _, err := controllerutil.CreateOrUpdate(ctx, r.Client, np, func() error {
-		desired := resources.BuildNetworkPolicy(instance)
+		desired := resources.BuildNetworkPolicy(instance, r.OperatorNamespace)
 		np.Labels = desired.Labels
 		np.Spec = desired.Spec
 		return controllerutil.SetControllerReference(instance, np, r.Scheme)

@@ -1580,7 +1580,7 @@ func TestBuildService_CustomPortsTargetPortDefaultsToPort(t *testing.T) {
 
 func TestBuildNetworkPolicy_Default(t *testing.T) {
 	instance := newTestInstance("np-test")
-	np := BuildNetworkPolicy(instance)
+	np := BuildNetworkPolicy(instance, "")
 
 	if np.Name != "np-test" {
 		t.Errorf("network policy name = %q, want %q", np.Name, "np-test")
@@ -1675,7 +1675,7 @@ func TestBuildNetworkPolicy_CustomServicePorts(t *testing.T) {
 		{Name: "grpc", Port: 50051, Protocol: corev1.ProtocolTCP},
 	}
 
-	np := BuildNetworkPolicy(instance)
+	np := BuildNetworkPolicy(instance, "")
 
 	// Same-namespace ingress rule should use custom ports + metrics (enabled by default)
 	firstIngress := np.Spec.Ingress[0]
@@ -1693,7 +1693,7 @@ func TestBuildNetworkPolicy_CustomServicePortsWithTargetPort(t *testing.T) {
 		{Name: "http", Port: 80, TargetPort: Ptr(int32(3978))},
 	}
 
-	np := BuildNetworkPolicy(instance)
+	np := BuildNetworkPolicy(instance, "")
 
 	firstIngress := np.Spec.Ingress[0]
 	if len(firstIngress.Ports) != 2 {
@@ -1712,7 +1712,7 @@ func TestBuildNetworkPolicy_CustomPortsApplyToAllRules(t *testing.T) {
 	instance.Spec.Security.NetworkPolicy.AllowedIngressNamespaces = []string{"monitoring"}
 	instance.Spec.Security.NetworkPolicy.AllowedIngressCIDRs = []string{"10.0.0.0/8"}
 
-	np := BuildNetworkPolicy(instance)
+	np := BuildNetworkPolicy(instance, "")
 
 	// 3 rules: same-ns, monitoring ns, CIDR
 	if len(np.Spec.Ingress) != 3 {
@@ -1737,7 +1737,7 @@ func TestBuildNetworkPolicy_CustomCIDRs(t *testing.T) {
 		"172.16.0.0/12",
 	}
 
-	np := BuildNetworkPolicy(instance)
+	np := BuildNetworkPolicy(instance, "")
 
 	// Should have 3 ingress rules: same-ns + 2 CIDRs
 	if len(np.Spec.Ingress) != 3 {
@@ -1775,7 +1775,7 @@ func TestBuildNetworkPolicy_DNSDisabled(t *testing.T) {
 	instance := newTestInstance("np-no-dns")
 	instance.Spec.Security.NetworkPolicy.AllowDNS = Ptr(false)
 
-	np := BuildNetworkPolicy(instance)
+	np := BuildNetworkPolicy(instance, "")
 
 	// Without DNS, only HTTPS egress rule
 	if len(np.Spec.Egress) != 1 {
@@ -1796,7 +1796,7 @@ func TestBuildNetworkPolicy_AllowedNamespaces(t *testing.T) {
 		"monitoring",
 	}
 
-	np := BuildNetworkPolicy(instance)
+	np := BuildNetworkPolicy(instance, "")
 
 	// Should have 3 ingress rules: same-ns + 2 allowed namespaces
 	if len(np.Spec.Ingress) != 3 {
@@ -1810,6 +1810,37 @@ func TestBuildNetworkPolicy_AllowedNamespaces(t *testing.T) {
 	nsRule2 := np.Spec.Ingress[2]
 	if nsRule2.From[0].NamespaceSelector.MatchLabels["kubernetes.io/metadata.name"] != "monitoring" {
 		t.Error("third ingress rule should allow monitoring namespace")
+	}
+}
+
+func TestBuildNetworkPolicy_OperatorNamespaceIngress(t *testing.T) {
+	instance := newTestInstance("np-operator-ns")
+
+	np := BuildNetworkPolicy(instance, "openclaw-operator-system")
+
+	if len(np.Spec.Ingress) != 2 {
+		t.Fatalf("expected 2 ingress rules (instance namespace + operator namespace), got %d", len(np.Spec.Ingress))
+	}
+
+	operatorRule := np.Spec.Ingress[1]
+	if len(operatorRule.From) != 1 || operatorRule.From[0].NamespaceSelector == nil {
+		t.Fatal("operator ingress rule should contain a namespace selector")
+	}
+	if got := operatorRule.From[0].NamespaceSelector.MatchLabels["kubernetes.io/metadata.name"]; got != "openclaw-operator-system" {
+		t.Fatalf("operator ingress namespace selector = %q, want %q", got, "openclaw-operator-system")
+	}
+	assertNPPort(t, operatorRule.Ports, GatewayProxyPort)
+	assertNPPort(t, operatorRule.Ports, CanvasProxyPort)
+	assertNPPort(t, operatorRule.Ports, int(DefaultMetricsPort))
+}
+
+func TestBuildNetworkPolicy_OperatorNamespaceSameAsInstanceNotDuplicated(t *testing.T) {
+	instance := newTestInstance("np-operator-same")
+
+	np := BuildNetworkPolicy(instance, instance.Namespace)
+
+	if len(np.Spec.Ingress) != 1 {
+		t.Fatalf("expected 1 ingress rule when operator namespace matches instance namespace, got %d", len(np.Spec.Ingress))
 	}
 }
 
@@ -1850,7 +1881,7 @@ func TestBuildNetworkPolicy_AdditionalEgress(t *testing.T) {
 		},
 	}
 
-	np := BuildNetworkPolicy(instance)
+	np := BuildNetworkPolicy(instance, "")
 
 	// Default rules: DNS (index 0) + HTTPS (index 1) = 2, plus 2 additional = 4
 	if len(np.Spec.Egress) != 4 {
@@ -4026,7 +4057,7 @@ func TestAllBuilders_ConsistentLabels(t *testing.T) {
 	}{
 		{"Deployment", BuildStatefulSet(instance, "", nil, nil, nil).Labels},
 		{"Service", BuildService(instance).Labels},
-		{"NetworkPolicy", BuildNetworkPolicy(instance).Labels},
+		{"NetworkPolicy", BuildNetworkPolicy(instance, "").Labels},
 		{"ServiceAccount", BuildServiceAccount(instance).Labels},
 		{"Role", BuildRole(instance).Labels},
 		{"RoleBinding", BuildRoleBinding(instance).Labels},
@@ -4066,7 +4097,7 @@ func TestAllBuilders_ConsistentNamespace(t *testing.T) {
 	}{
 		{"Deployment", BuildStatefulSet(instance, "", nil, nil, nil).Namespace},
 		{"Service", BuildService(instance).Namespace},
-		{"NetworkPolicy", BuildNetworkPolicy(instance).Namespace},
+		{"NetworkPolicy", BuildNetworkPolicy(instance, "").Namespace},
 		{"ServiceAccount", BuildServiceAccount(instance).Namespace},
 		{"Role", BuildRole(instance).Namespace},
 		{"RoleBinding", BuildRoleBinding(instance).Namespace},
@@ -7903,7 +7934,7 @@ func TestBuildNetworkPolicy_TailscaleEgress(t *testing.T) {
 	instance := newTestInstance("ts-np")
 	instance.Spec.Tailscale.Enabled = true
 
-	np := BuildNetworkPolicy(instance)
+	np := BuildNetworkPolicy(instance, "")
 
 	// Default egress: DNS (0), HTTPS (1), K8s API 6443 (2), Tailscale STUN+WireGuard (3)
 	if len(np.Spec.Egress) < 4 {
@@ -7947,7 +7978,7 @@ func TestBuildNetworkPolicy_TailscaleEgress(t *testing.T) {
 func TestBuildNetworkPolicy_TailscaleDisabled(t *testing.T) {
 	instance := newTestInstance("ts-np-off")
 
-	np := BuildNetworkPolicy(instance)
+	np := BuildNetworkPolicy(instance, "")
 
 	// Default egress: DNS (0), HTTPS (1) - no Tailscale rules
 	if len(np.Spec.Egress) != 2 {
@@ -9412,7 +9443,7 @@ func TestBuildNetworkPolicy_SelfConfigureEgress(t *testing.T) {
 		Enabled: true,
 	}
 
-	np := BuildNetworkPolicy(instance)
+	np := BuildNetworkPolicy(instance, "")
 
 	// Check for port 6443 egress rule
 	found6443 := false
@@ -9432,7 +9463,7 @@ func TestBuildNetworkPolicy_SelfConfigureDisabledNo6443(t *testing.T) {
 	instance := newTestInstance("sc-netpol-off")
 	// Both selfConfigure and tailscale are disabled by default
 
-	np := BuildNetworkPolicy(instance)
+	np := BuildNetworkPolicy(instance, "")
 
 	for _, rule := range np.Spec.Egress {
 		for _, port := range rule.Ports {
@@ -10492,7 +10523,7 @@ func TestBuildNetworkPolicy_WebTerminalIngressPort(t *testing.T) {
 	instance := newTestInstance("np-web-terminal")
 	instance.Spec.WebTerminal.Enabled = true
 
-	np := BuildNetworkPolicy(instance)
+	np := BuildNetworkPolicy(instance, "")
 
 	// Default ingress rule should have 4 ports (gateway, canvas, web-terminal, metrics)
 	if len(np.Spec.Ingress) == 0 {
@@ -10521,7 +10552,7 @@ func TestBuildNetworkPolicy_ChromiumIngressAndEgress(t *testing.T) {
 	instance := newTestInstance("np-chromium")
 	instance.Spec.Chromium.Enabled = true
 
-	np := BuildNetworkPolicy(instance)
+	np := BuildNetworkPolicy(instance, "")
 
 	// Ingress: chromium port (9222) should be in ingress ports
 	if len(np.Spec.Ingress) == 0 {
@@ -10753,7 +10784,7 @@ func TestBuildService_DefaultTargetsProxyPorts(t *testing.T) {
 
 func TestBuildNetworkPolicy_DefaultUsesProxyPorts(t *testing.T) {
 	instance := newTestInstance("np-proxy")
-	np := BuildNetworkPolicy(instance)
+	np := BuildNetworkPolicy(instance, "")
 
 	if len(np.Spec.Ingress) == 0 {
 		t.Fatal("expected at least one ingress rule")
@@ -10782,7 +10813,7 @@ func TestBuildNetworkPolicy_DefaultUsesProxyPorts(t *testing.T) {
 
 func TestBuildNetworkPolicy_MetricsPortIncludedByDefault(t *testing.T) {
 	instance := newTestInstance("np-metrics")
-	np := BuildNetworkPolicy(instance)
+	np := BuildNetworkPolicy(instance, "")
 
 	ports := np.Spec.Ingress[0].Ports
 	found := false
@@ -10799,7 +10830,7 @@ func TestBuildNetworkPolicy_MetricsPortIncludedByDefault(t *testing.T) {
 func TestBuildNetworkPolicy_MetricsPortExcludedWhenDisabled(t *testing.T) {
 	instance := newTestInstance("np-no-metrics")
 	instance.Spec.Observability.Metrics.Enabled = Ptr(false)
-	np := BuildNetworkPolicy(instance)
+	np := BuildNetworkPolicy(instance, "")
 
 	ports := np.Spec.Ingress[0].Ports
 	for _, p := range ports {
@@ -10812,7 +10843,7 @@ func TestBuildNetworkPolicy_MetricsPortExcludedWhenDisabled(t *testing.T) {
 func TestBuildNetworkPolicy_CustomMetricsPort(t *testing.T) {
 	instance := newTestInstance("np-custom-metrics")
 	instance.Spec.Observability.Metrics.Port = Ptr(int32(8080))
-	np := BuildNetworkPolicy(instance)
+	np := BuildNetworkPolicy(instance, "")
 
 	ports := np.Spec.Ingress[0].Ports
 	found := false
@@ -10831,7 +10862,7 @@ func TestBuildNetworkPolicy_MetricsPortWithCustomServicePorts(t *testing.T) {
 	instance.Spec.Networking.Service.Ports = []openclawv1alpha1.ServicePortSpec{
 		{Name: "http", Port: 3978},
 	}
-	np := BuildNetworkPolicy(instance)
+	np := BuildNetworkPolicy(instance, "")
 
 	ports := np.Spec.Ingress[0].Ports
 	foundCustom := false
@@ -10857,7 +10888,7 @@ func TestBuildNetworkPolicy_MetricsPortWithCustomServicePorts(t *testing.T) {
 func TestBuildNetworkPolicy_MetricsPortOnAllIngressRules(t *testing.T) {
 	instance := newTestInstance("np-metrics-all-rules")
 	instance.Spec.Security.NetworkPolicy.AllowedIngressNamespaces = []string{"monitoring"}
-	np := BuildNetworkPolicy(instance)
+	np := BuildNetworkPolicy(instance, "")
 
 	for i, rule := range np.Spec.Ingress {
 		found := false
@@ -10875,7 +10906,7 @@ func TestBuildNetworkPolicy_MetricsPortOnAllIngressRules(t *testing.T) {
 func TestBuildNetworkPolicy_GatewayProxyDisabled_UsesDirectPorts(t *testing.T) {
 	instance := newTestInstance("np-no-proxy")
 	instance.Spec.Gateway.Enabled = Ptr(false)
-	np := BuildNetworkPolicy(instance)
+	np := BuildNetworkPolicy(instance, "")
 
 	if len(np.Spec.Ingress) == 0 {
 		t.Fatal("expected at least one ingress rule")
@@ -11136,8 +11167,8 @@ func TestBuildConfigMap_Idempotent(t *testing.T) {
 
 func TestBuildNetworkPolicy_Idempotent(t *testing.T) {
 	instance := newTestInstance("idem-np")
-	n1 := BuildNetworkPolicy(instance)
-	n2 := BuildNetworkPolicy(instance)
+	n1 := BuildNetworkPolicy(instance, "")
+	n2 := BuildNetworkPolicy(instance, "")
 	b1, _ := json.Marshal(n1.Spec)
 	b2, _ := json.Marshal(n2.Spec)
 	if !bytes.Equal(b1, b2) {
@@ -11287,7 +11318,7 @@ func TestBuildConfigMap_EmptyConfig(t *testing.T) {
 func TestBuildNetworkPolicy_Disabled(t *testing.T) {
 	instance := newTestInstance("np-disabled")
 	instance.Spec.Security.NetworkPolicy.Enabled = Ptr(false)
-	np := BuildNetworkPolicy(instance)
+	np := BuildNetworkPolicy(instance, "")
 	// BuildNetworkPolicy still returns a NetworkPolicy object - the controller
 	// decides whether to create it based on the Enabled flag
 	if np == nil {
