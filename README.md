@@ -1150,6 +1150,13 @@ make generate manifests
 # Run tests
 make test
 
+# Run only the controller envtest suite (recommended for local controller work)
+make test-controller
+
+# Or run controller tests directly after downloading envtest binaries once
+make envtest
+go test ./internal/controller/... -count=1
+
 # Run linter
 make lint
 

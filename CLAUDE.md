@@ -12,6 +12,7 @@ Go-based Kubernetes operator for managing OpenClaw instances, built with control
 
 ```bash
 make test          # Unit + integration tests (requires envtest binaries)
+make test-controller # Controller envtest suite with repo-local kubebuilder assets
 make lint          # golangci-lint
 make build         # Build manager binary
 make manifests     # Regenerate CRD YAML + RBAC after API type changes
@@ -142,6 +143,8 @@ After modifying types in `api/v1alpha1/openclawinstance_types.go`:
 ### Testing
 - Resource builders: unit tests in `internal/resources/resources_test.go` (fast, no deps)
 - Controller integration: envtest suite in `internal/controller/` (needs kubebuilder binaries)
+  - Preferred local entrypoint: `make test-controller`
+  - Direct `go test ./internal/controller/...` also works after `make envtest`, because the suite now auto-detects repo-local `./bin/k8s/<version>-<os>-<arch>` assets before envtest falls back to `/usr/local/kubebuilder/bin`
 - E2E: `test/e2e/` (needs kind cluster, runs in CI on PRs and main)
 - **Always add e2e tests when feasible** -- any new feature or bug fix that changes the behavior of managed Kubernetes resources should include an e2e test verifying the resources are created correctly on a real cluster
 - The `RawConfig` type embeds `runtime.RawExtension` -- in tests use:

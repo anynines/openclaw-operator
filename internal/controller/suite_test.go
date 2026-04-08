@@ -18,7 +18,10 @@ package controller
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -36,6 +39,8 @@ import (
 	"github.com/openclawrocks/openclaw-operator/internal/plans"
 )
 
+const envtestK8sVersion = "1.31.0"
+
 var (
 	cfg       *rest.Config
 	k8sClient client.Client
@@ -43,6 +48,25 @@ var (
 	ctx       context.Context
 	cancel    context.CancelFunc
 )
+
+func resolveEnvtestBinaryAssetsDirectory() (string, error) {
+	if assetsDir := os.Getenv("KUBEBUILDER_ASSETS"); assetsDir != "" {
+		return assetsDir, nil
+	}
+
+	assetsDir := filepath.Join("..", "..", "bin", "k8s", fmt.Sprintf("%s-%s-%s", envtestK8sVersion, runtime.GOOS, runtime.GOARCH))
+	for _, binary := range []string{"etcd", "kube-apiserver", "kubectl"} {
+		if _, err := os.Stat(filepath.Join(assetsDir, binary)); err != nil {
+			return "", fmt.Errorf(
+				"envtest binaries not found at %q and KUBEBUILDER_ASSETS is not set; run `make envtest` once, then rerun `go test ./internal/controller/...`, or use `make test-controller`: missing %s",
+				assetsDir,
+				binary,
+			)
+		}
+	}
+
+	return assetsDir, nil
+}
 
 func TestControllers(t *testing.T) {
 	RegisterFailHandler(Fail)
@@ -55,12 +79,15 @@ var _ = BeforeSuite(func() {
 	ctx, cancel = context.WithCancel(context.TODO())
 
 	By("bootstrapping test environment")
+	assetsDir, err := resolveEnvtestBinaryAssetsDirectory()
+	Expect(err).NotTo(HaveOccurred())
+
 	testEnv = &envtest.Environment{
 		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "config", "crd", "bases")},
 		ErrorIfCRDPathMissing: true,
+		BinaryAssetsDirectory: assetsDir,
 	}
 
-	var err error
 	cfg, err = testEnv.Start()
 	Expect(err).NotTo(HaveOccurred())
 	Expect(cfg).NotTo(BeNil())
