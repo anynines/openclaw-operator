@@ -25,9 +25,9 @@ rules:
   - events
   verbs:
   - create
-  - patch
   - get
   - list
+  - patch
   - watch
 - apiGroups:
   - ""
@@ -53,9 +53,16 @@ rules:
   - apps
   resources:
   - deployments
-  - replicasets
   verbs:
   - delete
+  - get
+  - list
+  - watch
+- apiGroups:
+  - apps
+  resources:
+  - replicasets
+  verbs:
   - get
   - list
   - watch
