@@ -16,7 +16,7 @@ import (
 
 const (
 	healthCheckTimeout     = 10 * time.Second
-	healthCheckPath        = "/api/health"
+	healthCheckPath        = "/health"
 	healthCheckGracePeriod = 60 * time.Second
 	defaultGatewayPort     = 18789
 )

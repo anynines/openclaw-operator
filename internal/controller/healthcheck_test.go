@@ -51,7 +51,10 @@ func (d *failDoer) Get(_ string) (*http.Response, error) {
 }
 
 func TestHealthCheck_200_SetsTrue(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/health" {
+			t.Fatalf("expected request path /health, got %s", r.URL.Path)
+		}
 		w.WriteHeader(200)
 	}))
 	defer srv.Close()
